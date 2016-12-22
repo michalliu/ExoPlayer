@@ -223,6 +223,9 @@ import java.util.Locale;
         + "prog_index.m3u8", Util.TYPE_HLS),
     new Sample("Apple ID3 metadata", "http://devimages.apple.com/samplecode/adDemo/ad.m3u8",
         Util.TYPE_HLS),
+
+     new Sample("Problem HLS", "/sdcard/samples/test.m3u8",
+          Util.TYPE_HLS),
   };
 
   public static final Sample[] MISC = new Sample[] {
