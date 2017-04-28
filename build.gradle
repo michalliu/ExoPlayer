@@ -59,6 +59,27 @@ allprojects {
     }
 }
 
+task releaseBundleJar(type: Jar) {
+    destinationDir = file(project.buildDir.absolutePath)
+    archiveName = "exoplayer2-bundle.jar"
+    println(project(":library-core").buildDir.absolutePath)
+    def srcClassDir = [
+            project(":library-core").buildDir.absolutePath + "/intermediates/classes/release",
+			project(":library-dash").buildDir.absolutePath + "/intermediates/classes/release",
+            project(":library-hls").buildDir.absolutePath + "/intermediates/classes/release",
+			project(":library-smoothstreaming").buildDir.absolutePath + "/intermediates/classes/release",
+			project(":library-ui").buildDir.absolutePath + "/intermediates/classes/release"
+    ]
+
+    from srcClassDir
+    exclude '**/BuildConfig.class'
+    exclude '**/R.class'
+    exclude '**/R$*.class'
+    exclude "android/view/*.class"
+}
+
+releaseBundleJar.dependsOn(":library:build")
+
 def getBintrayRepo() {
     boolean publicRepo = hasProperty('publicRepo') &&
         property('publicRepo').toBoolean()
