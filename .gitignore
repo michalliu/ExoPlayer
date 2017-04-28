@@ -61,3 +61,11 @@ extensions/cronet/jniLibs/*
 !extensions/cronet/jniLibs/README.md
 extensions/cronet/libs/*
 !extensions/cronet/libs/README.md
+
+# Demo local gradle file
+demo/gradle/
+demo/gradlew
+demo/gradlew.bat
+
+# Vim tmp
+*~
