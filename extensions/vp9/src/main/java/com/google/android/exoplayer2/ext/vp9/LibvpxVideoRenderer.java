@@ -71,7 +71,7 @@ public final class LibvpxVideoRenderer extends BaseRenderer {
   private DecoderCounters decoderCounters;
   private Format format;
   private VpxDecoder decoder;
-  private DecoderInputBuffer inputBuffer;
+  private VpxInputBuffer inputBuffer;
   private VpxOutputBuffer outputBuffer;
   private VpxOutputBuffer nextOutputBuffer;
   private DrmSession<ExoMediaCrypto> drmSession;
@@ -286,7 +286,7 @@ public final class LibvpxVideoRenderer extends BaseRenderer {
    *
    * @param outputBufferTimeUs The timestamp of the current output buffer.
    * @param nextOutputBufferTimeUs The timestamp of the next output buffer or
-   *     {@link TIME_UNSET} if the next output buffer is unavailable.
+   *     {@link C#TIME_UNSET} if the next output buffer is unavailable.
    * @param positionUs The current playback position.
    * @param joiningDeadlineMs The joining deadline.
    * @return Returns whether to drop the current output buffer.
@@ -394,6 +394,7 @@ public final class LibvpxVideoRenderer extends BaseRenderer {
       return false;
     }
     inputBuffer.flip();
+    inputBuffer.colorInfo = formatHolder.format.colorInfo;
     decoder.queueInputBuffer(inputBuffer);
     decoderCounters.inputBufferCount++;
     inputBuffer = null;
