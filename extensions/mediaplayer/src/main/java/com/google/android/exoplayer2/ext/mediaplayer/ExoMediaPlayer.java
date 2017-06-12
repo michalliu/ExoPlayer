@@ -844,6 +844,7 @@ public class ExoMediaPlayer implements MediaPlayerInterface {
         // BufferUpdate Repeater
         @Override
         public void onUpdate() {
+            if (mIsRelease) return;
             if (mExoPlayer != null) {
                 int state = mExoPlayer.getPlaybackState();
                 switch (state) {
