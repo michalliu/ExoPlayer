@@ -29,7 +29,6 @@ import com.google.android.exoplayer2.util.ParsableByteArray;
 import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * A queue of media samples.
@@ -52,19 +51,15 @@ public final class SampleQueue implements TrackOutput {
 
   private static final int INITIAL_SCRATCH_SIZE = 32;
 
-  private static final int STATE_ENABLED = 0;
-  private static final int STATE_ENABLED_WRITING = 1;
-  private static final int STATE_DISABLED = 2;
-
   private final Allocator allocator;
   private final int allocationLength;
   private final SampleMetadataQueue metadataQueue;
   private final SampleExtrasHolder extrasHolder;
   private final ParsableByteArray scratch;
-  private final AtomicInteger state;
 
   // References into the linked list of allocations.
   private AllocationNode firstAllocationNode;
+  private AllocationNode readAllocationNode;
   private AllocationNode writeAllocationNode;
 
   // Accessed only by the consuming thread.
@@ -87,8 +82,8 @@ public final class SampleQueue implements TrackOutput {
     metadataQueue = new SampleMetadataQueue();
     extrasHolder = new SampleExtrasHolder();
     scratch = new ParsableByteArray(INITIAL_SCRATCH_SIZE);
-    state = new AtomicInteger();
     firstAllocationNode = new AllocationNode(0, allocationLength);
+    readAllocationNode = firstAllocationNode;
     writeAllocationNode = firstAllocationNode;
   }
 
@@ -96,16 +91,15 @@ public final class SampleQueue implements TrackOutput {
 
   /**
    * Resets the output.
-   *
-   * @param enable Whether the output should be enabled. False if it should be disabled.
    */
-  public void reset(boolean enable) {
-    int previousState = state.getAndSet(enable ? STATE_ENABLED : STATE_DISABLED);
-    clearSampleData();
-    metadataQueue.resetLargestParsedTimestamps();
-    if (previousState == STATE_DISABLED) {
-      downstreamFormat = null;
-    }
+  public void reset() {
+    metadataQueue.clearSampleData();
+    clearAllocationNodes(firstAllocationNode);
+    firstAllocationNode = new AllocationNode(0, allocationLength);
+    readAllocationNode = firstAllocationNode;
+    writeAllocationNode = firstAllocationNode;
+    totalBytesWritten = 0;
+    allocator.trim();
   }
 
   /**
@@ -118,8 +112,7 @@ public final class SampleQueue implements TrackOutput {
   }
 
   /**
-   * Indicates that samples subsequently queued to the buffer should be spliced into those already
-   * queued.
+   * Indicates samples that are subsequently queued should be spliced into those already queued.
    */
   public void splice() {
     pendingSplice = true;
@@ -133,50 +126,39 @@ public final class SampleQueue implements TrackOutput {
   }
 
   /**
-   * Discards samples from the write side of the buffer.
+   * Discards samples from the write side of the queue.
    *
-   * @param discardFromIndex The absolute index of the first sample to be discarded.
+   * @param discardFromIndex The absolute index of the first sample to be discarded. Must be in the
+   *     range [{@link #getReadIndex()}, {@link #getWriteIndex()}].
    */
   public void discardUpstreamSamples(int discardFromIndex) {
     totalBytesWritten = metadataQueue.discardUpstreamSamples(discardFromIndex);
-    dropUpstreamFrom(totalBytesWritten);
-  }
-
-  /**
-   * Discards data from the write side of the buffer. Data is discarded from the specified absolute
-   * position. Any allocations that are fully discarded are returned to the allocator.
-   *
-   * @param absolutePosition The absolute position (inclusive) from which to discard data.
-   */
-  private void dropUpstreamFrom(long absolutePosition) {
-    if (absolutePosition == firstAllocationNode.startPosition) {
+    if (totalBytesWritten == 0 || totalBytesWritten == firstAllocationNode.startPosition) {
       clearAllocationNodes(firstAllocationNode);
-      firstAllocationNode = new AllocationNode(absolutePosition, allocationLength);
+      firstAllocationNode = new AllocationNode(totalBytesWritten, allocationLength);
+      readAllocationNode = firstAllocationNode;
       writeAllocationNode = firstAllocationNode;
     } else {
-      AllocationNode newWriteAllocationNode = firstAllocationNode;
-      AllocationNode currentNode = firstAllocationNode.next;
-      while (absolutePosition > currentNode.startPosition) {
-        newWriteAllocationNode = currentNode;
-        currentNode = currentNode.next;
+      // Find the last node containing at least 1 byte of data that we need to keep.
+      AllocationNode lastNodeToKeep = firstAllocationNode;
+      while (totalBytesWritten > lastNodeToKeep.endPosition) {
+        lastNodeToKeep = lastNodeToKeep.next;
       }
-      clearAllocationNodes(currentNode);
-      writeAllocationNode = newWriteAllocationNode;
-      writeAllocationNode.next = new AllocationNode(writeAllocationNode.endPosition,
-          allocationLength);
+      // Discard all subsequent nodes.
+      AllocationNode firstNodeToDiscard = lastNodeToKeep.next;
+      clearAllocationNodes(firstNodeToDiscard);
+      // Reset the successor of the last node to be an uninitialized node.
+      lastNodeToKeep.next = new AllocationNode(lastNodeToKeep.endPosition, allocationLength);
+      // Update writeAllocationNode and readAllocationNode as necessary.
+      writeAllocationNode = totalBytesWritten == lastNodeToKeep.endPosition ? lastNodeToKeep.next
+          : lastNodeToKeep;
+      if (readAllocationNode == firstNodeToDiscard) {
+        readAllocationNode = lastNodeToKeep.next;
+      }
     }
   }
 
   // Called by the consuming thread.
-
-  /**
-   * Disables buffering of sample data and metadata.
-   */
-  public void disable() {
-    if (state.getAndSet(STATE_DISABLED) == STATE_ENABLED) {
-      clearSampleData();
-    }
-  }
 
   /**
    * Returns whether a sample is available to be read.
@@ -193,8 +175,8 @@ public final class SampleQueue implements TrackOutput {
   }
 
   /**
-   * Peeks the source id of the next sample, or the current upstream source id if the buffer is
-   * empty.
+   * Peeks the source id of the next sample to be read, or the current upstream source id if the
+   * queue is empty or if the read position is at the end of the queue.
    *
    * @return The source id.
    */
@@ -224,33 +206,61 @@ public final class SampleQueue implements TrackOutput {
   }
 
   /**
-   * Skips all samples currently in the buffer.
+   * Rewinds the read position to the first sample in the queue.
    */
-  public void skipAll() {
-    long nextOffset = metadataQueue.skipAll();
-    if (nextOffset != C.POSITION_UNSET) {
-      dropDownstreamTo(nextOffset);
-    }
+  public void rewind() {
+    metadataQueue.rewind();
+    readAllocationNode = firstAllocationNode;
   }
 
   /**
-   * Attempts to skip to the keyframe before or at the specified time. Succeeds only if the buffer
-   * contains a keyframe with a timestamp of {@code timeUs} or earlier. If
-   * {@code allowTimeBeyondBuffer} is {@code false} then it is also required that {@code timeUs}
-   * falls within the buffer.
+   * Discards up to but not including the sample immediately before or at the specified time.
    *
-   * @param timeUs The seek time.
-   * @param allowTimeBeyondBuffer Whether the skip can succeed if {@code timeUs} is beyond the end
-   *     of the buffer.
-   * @return Whether the skip was successful.
+   * @param timeUs The time to discard to.
+   * @param toKeyframe If true then discards samples up to the keyframe before or at the specified
+   *     time, rather than any sample before or at that time.
+   * @param stopAtReadPosition If true then samples are only discarded if they're before the
+   *     read position. If false then samples at and beyond the read position may be discarded, in
+   *     which case the read position is advanced to the first remaining sample.
    */
-  public boolean skipToKeyframeBefore(long timeUs, boolean allowTimeBeyondBuffer) {
-    long nextOffset = metadataQueue.skipToKeyframeBefore(timeUs, allowTimeBeyondBuffer);
-    if (nextOffset == C.POSITION_UNSET) {
-      return false;
-    }
-    dropDownstreamTo(nextOffset);
-    return true;
+  public void discardTo(long timeUs, boolean toKeyframe, boolean stopAtReadPosition) {
+    discardDownstreamTo(metadataQueue.discardTo(timeUs, toKeyframe, stopAtReadPosition));
+  }
+
+  /**
+   * Discards up to but not including the read position.
+   */
+  public void discardToRead() {
+    discardDownstreamTo(metadataQueue.discardToRead());
+  }
+
+  /**
+   * Discards to the end of the queue. The read position is also advanced.
+   */
+  public void discardToEnd() {
+    discardDownstreamTo(metadataQueue.discardToEnd());
+  }
+
+  /**
+   * Advances the read position to the end of the queue.
+   */
+  public void advanceToEnd() {
+    metadataQueue.advanceToEnd();
+  }
+
+  /**
+   * Attempts to advance the read position to the sample before or at the specified time.
+   *
+   * @param timeUs The time to advance to.
+   * @param toKeyframe If true then attempts to advance to the keyframe before or at the specified
+   *     time, rather than to any sample before or at that time.
+   * @param allowTimeBeyondBuffer Whether the operation can succeed if {@code timeUs} is beyond the
+   *     end of the queue, by advancing the read position to the last sample (or keyframe).
+   * @return Whether the operation was a success. A successful advance is one in which the read
+   *     position was unchanged or advanced, and is now at a sample meeting the specified criteria.
+   */
+  public boolean advanceTo(long timeUs, boolean toKeyframe, boolean allowTimeBeyondBuffer) {
+    return metadataQueue.advanceTo(timeUs, toKeyframe, allowTimeBeyondBuffer);
   }
 
   /**
@@ -269,9 +279,9 @@ public final class SampleQueue implements TrackOutput {
    * @return The result, which can be {@link C#RESULT_NOTHING_READ}, {@link C#RESULT_FORMAT_READ} or
    *     {@link C#RESULT_BUFFER_READ}.
    */
-  public int readData(FormatHolder formatHolder, DecoderInputBuffer buffer, boolean formatRequired,
+  public int read(FormatHolder formatHolder, DecoderInputBuffer buffer, boolean formatRequired,
       boolean loadingFinished, long decodeOnlyUntilUs) {
-    int result = metadataQueue.readData(formatHolder, buffer, formatRequired, loadingFinished,
+    int result = metadataQueue.read(formatHolder, buffer, formatRequired, loadingFinished,
         downstreamFormat, extrasHolder);
     switch (result) {
       case C.RESULT_FORMAT_READ:
@@ -289,8 +299,6 @@ public final class SampleQueue implements TrackOutput {
           // Write the sample data into the holder.
           buffer.ensureSpaceForWrite(extrasHolder.size);
           readData(extrasHolder.offset, buffer.data, extrasHolder.size);
-          // Advance the read head.
-          dropDownstreamTo(extrasHolder.nextOffset);
         }
         return C.RESULT_BUFFER_READ;
       case C.RESULT_NOTHING_READ:
@@ -366,7 +374,8 @@ public final class SampleQueue implements TrackOutput {
     // Populate the cryptoInfo.
     CryptoData cryptoData = extrasHolder.cryptoData;
     buffer.cryptoInfo.set(subsampleCount, clearDataSizes, encryptedDataSizes,
-        cryptoData.encryptionKey, buffer.cryptoInfo.iv, cryptoData.cryptoMode);
+        cryptoData.encryptionKey, buffer.cryptoInfo.iv, cryptoData.cryptoMode,
+        cryptoData.encryptedBlocks, cryptoData.clearBlocks);
 
     // Adjust the offset and size to take into account the bytes read.
     int bytesRead = (int) (offset - extrasHolder.offset);
@@ -382,17 +391,16 @@ public final class SampleQueue implements TrackOutput {
    * @param length The number of bytes to read.
    */
   private void readData(long absolutePosition, ByteBuffer target, int length) {
+    advanceReadTo(absolutePosition);
     int remaining = length;
-    dropDownstreamTo(absolutePosition);
     while (remaining > 0) {
-      int toCopy = Math.min(remaining, (int) (firstAllocationNode.endPosition - absolutePosition));
-      Allocation allocation = firstAllocationNode.allocation;
-      target.put(allocation.data, firstAllocationNode.translateOffset(absolutePosition), toCopy);
+      int toCopy = Math.min(remaining, (int) (readAllocationNode.endPosition - absolutePosition));
+      Allocation allocation = readAllocationNode.allocation;
+      target.put(allocation.data, readAllocationNode.translateOffset(absolutePosition), toCopy);
       remaining -= toCopy;
       absolutePosition += toCopy;
-      if (absolutePosition == firstAllocationNode.endPosition) {
-        allocator.release(allocation);
-        firstAllocationNode = firstAllocationNode.clear();
+      if (absolutePosition == readAllocationNode.endPosition) {
+        readAllocationNode = readAllocationNode.next;
       }
     }
   }
@@ -405,32 +413,53 @@ public final class SampleQueue implements TrackOutput {
    * @param length The number of bytes to read.
    */
   private void readData(long absolutePosition, byte[] target, int length) {
+    advanceReadTo(absolutePosition);
     int remaining = length;
-    dropDownstreamTo(absolutePosition);
     while (remaining > 0) {
-      int toCopy = Math.min(remaining, (int) (firstAllocationNode.endPosition - absolutePosition));
-      Allocation allocation = firstAllocationNode.allocation;
-      System.arraycopy(allocation.data, firstAllocationNode.translateOffset(absolutePosition),
+      int toCopy = Math.min(remaining, (int) (readAllocationNode.endPosition - absolutePosition));
+      Allocation allocation = readAllocationNode.allocation;
+      System.arraycopy(allocation.data, readAllocationNode.translateOffset(absolutePosition),
           target, length - remaining, toCopy);
       remaining -= toCopy;
       absolutePosition += toCopy;
-      if (absolutePosition == firstAllocationNode.endPosition) {
-        allocator.release(allocation);
-        firstAllocationNode = firstAllocationNode.clear();
+      if (absolutePosition == readAllocationNode.endPosition) {
+        readAllocationNode = readAllocationNode.next;
       }
     }
   }
 
   /**
-   * Discard any allocations that hold data prior to the specified absolute position, returning
-   * them to the allocator.
+   * Advances {@link #readAllocationNode} to the specified absolute position.
    *
-   * @param absolutePosition The absolute position up to which allocations can be discarded.
+   * @param absolutePosition The position to which {@link #readAllocationNode} should be advanced.
    */
-  private void dropDownstreamTo(long absolutePosition) {
+  private void advanceReadTo(long absolutePosition) {
+    while (absolutePosition >= readAllocationNode.endPosition) {
+      readAllocationNode = readAllocationNode.next;
+    }
+  }
+
+  /**
+   * Advances {@link #firstAllocationNode} to the specified absolute position.
+   * {@link #readAllocationNode} is also advanced if necessary to avoid it falling behind
+   * {@link #firstAllocationNode}. Nodes that have been advanced past are cleared, and their
+   * underlying allocations are returned to the allocator.
+   *
+   * @param absolutePosition The position to which {@link #firstAllocationNode} should be advanced.
+   *     May be {@link C#POSITION_UNSET}, in which case calling this method is a no-op.
+   */
+  private void discardDownstreamTo(long absolutePosition) {
+    if (absolutePosition == C.POSITION_UNSET) {
+      return;
+    }
     while (absolutePosition >= firstAllocationNode.endPosition) {
       allocator.release(firstAllocationNode.allocation);
       firstAllocationNode = firstAllocationNode.clear();
+    }
+    // If we discarded the node referenced by readAllocationNode then we need to advance it to the
+    // first remaining node.
+    if (readAllocationNode.startPosition < firstAllocationNode.startPosition) {
+      readAllocationNode = firstAllocationNode;
     }
   }
 
@@ -447,7 +476,7 @@ public final class SampleQueue implements TrackOutput {
 
   /**
    * Sets an offset that will be added to the timestamps (and sub-sample timestamps) of samples
-   * subsequently queued to the buffer.
+   * that are subsequently queued.
    *
    * @param sampleOffsetUs The timestamp offset in microseconds.
    */
@@ -472,39 +501,21 @@ public final class SampleQueue implements TrackOutput {
   @Override
   public int sampleData(ExtractorInput input, int length, boolean allowEndOfInput)
       throws IOException, InterruptedException {
-    if (!startWriteOperation()) {
-      int bytesSkipped = input.skip(length);
-      if (bytesSkipped == C.RESULT_END_OF_INPUT) {
-        if (allowEndOfInput) {
-          return C.RESULT_END_OF_INPUT;
-        }
-        throw new EOFException();
+    length = preAppend(length);
+    int bytesAppended = input.read(writeAllocationNode.allocation.data,
+        writeAllocationNode.translateOffset(totalBytesWritten), length);
+    if (bytesAppended == C.RESULT_END_OF_INPUT) {
+      if (allowEndOfInput) {
+        return C.RESULT_END_OF_INPUT;
       }
-      return bytesSkipped;
+      throw new EOFException();
     }
-    try {
-      length = preAppend(length);
-      int bytesAppended = input.read(writeAllocationNode.allocation.data,
-          writeAllocationNode.translateOffset(totalBytesWritten), length);
-      if (bytesAppended == C.RESULT_END_OF_INPUT) {
-        if (allowEndOfInput) {
-          return C.RESULT_END_OF_INPUT;
-        }
-        throw new EOFException();
-      }
-      postAppend(bytesAppended);
-      return bytesAppended;
-    } finally {
-      endWriteOperation();
-    }
+    postAppend(bytesAppended);
+    return bytesAppended;
   }
 
   @Override
   public void sampleData(ParsableByteArray buffer, int length) {
-    if (!startWriteOperation()) {
-      buffer.skipBytes(length);
-      return;
-    }
     while (length > 0) {
       int bytesAppended = preAppend(length);
       buffer.readBytes(writeAllocationNode.allocation.data,
@@ -512,7 +523,6 @@ public final class SampleQueue implements TrackOutput {
       length -= bytesAppended;
       postAppend(bytesAppended);
     }
-    endWriteOperation();
   }
 
   @Override
@@ -521,45 +531,18 @@ public final class SampleQueue implements TrackOutput {
     if (pendingFormatAdjustment) {
       format(lastUnadjustedFormat);
     }
-    if (!startWriteOperation()) {
-      metadataQueue.commitSampleTimestamp(timeUs);
-      return;
-    }
-    try {
-      if (pendingSplice) {
-        if ((flags & C.BUFFER_FLAG_KEY_FRAME) == 0 || !metadataQueue.attemptSplice(timeUs)) {
-          return;
-        }
-        pendingSplice = false;
+    if (pendingSplice) {
+      if ((flags & C.BUFFER_FLAG_KEY_FRAME) == 0 || !metadataQueue.attemptSplice(timeUs)) {
+        return;
       }
-      timeUs += sampleOffsetUs;
-      long absoluteOffset = totalBytesWritten - size - offset;
-      metadataQueue.commitSample(timeUs, flags, absoluteOffset, size, cryptoData);
-    } finally {
-      endWriteOperation();
+      pendingSplice = false;
     }
+    timeUs += sampleOffsetUs;
+    long absoluteOffset = totalBytesWritten - size - offset;
+    metadataQueue.commitSample(timeUs, flags, absoluteOffset, size, cryptoData);
   }
 
   // Private methods.
-
-  private boolean startWriteOperation() {
-    return state.compareAndSet(STATE_ENABLED, STATE_ENABLED_WRITING);
-  }
-
-  private void endWriteOperation() {
-    if (!state.compareAndSet(STATE_ENABLED_WRITING, STATE_ENABLED)) {
-      clearSampleData();
-    }
-  }
-
-  private void clearSampleData() {
-    metadataQueue.clearSampleData();
-    clearAllocationNodes(firstAllocationNode);
-    firstAllocationNode = new AllocationNode(0, allocationLength);
-    writeAllocationNode = firstAllocationNode;
-    totalBytesWritten = 0;
-    allocator.trim();
-  }
 
   /**
    * Clears allocation nodes starting from {@code fromNode}.
@@ -690,13 +673,15 @@ public final class SampleQueue implements TrackOutput {
     }
 
     /**
-     * Clears {@link #allocation}.
+     * Clears {@link #allocation} and {@link #next}.
      *
-     * @return The next {@link AllocationNode}, for convenience.
+     * @return The cleared next {@link AllocationNode}.
      */
     public AllocationNode clear() {
       allocation = null;
-      return next;
+      AllocationNode temp = next;
+      next = null;
+      return temp;
     }
 
   }

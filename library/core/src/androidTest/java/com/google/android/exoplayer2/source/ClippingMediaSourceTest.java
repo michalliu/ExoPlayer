@@ -21,9 +21,11 @@ import com.google.android.exoplayer2.ExoPlayer;
 import com.google.android.exoplayer2.Timeline;
 import com.google.android.exoplayer2.Timeline.Period;
 import com.google.android.exoplayer2.Timeline.Window;
-import com.google.android.exoplayer2.TimelineTest;
-import com.google.android.exoplayer2.TimelineTest.FakeTimeline;
-import com.google.android.exoplayer2.TimelineTest.TimelineVerifier;
+import com.google.android.exoplayer2.testutil.FakeMediaSource;
+import com.google.android.exoplayer2.testutil.FakeTimeline;
+import com.google.android.exoplayer2.testutil.FakeTimeline.TimelineWindowDefinition;
+import com.google.android.exoplayer2.testutil.TestUtil;
+import com.google.android.exoplayer2.testutil.TimelineAsserts;
 
 /**
  * Unit tests for {@link ClippingMediaSource}.
@@ -101,26 +103,28 @@ public final class ClippingMediaSourceTest extends InstrumentationTestCase {
   }
 
   public void testWindowAndPeriodIndices() {
-    Timeline timeline = new FakeTimeline(1, 111);
+    Timeline timeline = new FakeTimeline(
+        new TimelineWindowDefinition(1, 111, true, false, TEST_PERIOD_DURATION_US));
     Timeline clippedTimeline = getClippedTimeline(timeline, TEST_CLIP_AMOUNT_US,
         TEST_PERIOD_DURATION_US - TEST_CLIP_AMOUNT_US);
-    new TimelineVerifier(clippedTimeline)
-        .assertWindowIds(111)
-        .assertPeriodCounts(1)
-        .assertPreviousWindowIndices(ExoPlayer.REPEAT_MODE_OFF, C.INDEX_UNSET)
-        .assertPreviousWindowIndices(ExoPlayer.REPEAT_MODE_ONE, 0)
-        .assertPreviousWindowIndices(ExoPlayer.REPEAT_MODE_ALL, 0)
-        .assertNextWindowIndices(ExoPlayer.REPEAT_MODE_OFF, C.INDEX_UNSET)
-        .assertNextWindowIndices(ExoPlayer.REPEAT_MODE_ONE, 0)
-        .assertNextWindowIndices(ExoPlayer.REPEAT_MODE_ALL, 0);
+    TimelineAsserts.assertWindowIds(clippedTimeline, 111);
+    TimelineAsserts.assertPeriodCounts(clippedTimeline, 1);
+    TimelineAsserts.assertPreviousWindowIndices(clippedTimeline, ExoPlayer.REPEAT_MODE_OFF,
+        C.INDEX_UNSET);
+    TimelineAsserts.assertPreviousWindowIndices(clippedTimeline, ExoPlayer.REPEAT_MODE_ONE, 0);
+    TimelineAsserts.assertPreviousWindowIndices(clippedTimeline, ExoPlayer.REPEAT_MODE_ALL, 0);
+    TimelineAsserts.assertNextWindowIndices(clippedTimeline, ExoPlayer.REPEAT_MODE_OFF,
+        C.INDEX_UNSET);
+    TimelineAsserts.assertNextWindowIndices(clippedTimeline, ExoPlayer.REPEAT_MODE_ONE, 0);
+    TimelineAsserts.assertNextWindowIndices(clippedTimeline, ExoPlayer.REPEAT_MODE_ALL, 0);
   }
 
   /**
    * Wraps the specified timeline in a {@link ClippingMediaSource} and returns the clipped timeline.
    */
   private static Timeline getClippedTimeline(Timeline timeline, long startMs, long endMs) {
-    MediaSource mediaSource = TimelineTest.stubMediaSourceSourceWithTimeline(timeline);
-    return TimelineTest.extractTimelineFromMediaSource(
+    MediaSource mediaSource = new FakeMediaSource(timeline, null);
+    return TestUtil.extractTimelineFromMediaSource(
         new ClippingMediaSource(mediaSource, startMs, endMs));
   }
 

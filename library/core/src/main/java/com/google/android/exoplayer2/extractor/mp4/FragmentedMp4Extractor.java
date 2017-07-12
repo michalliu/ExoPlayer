@@ -128,6 +128,7 @@ public final class FragmentedMp4Extractor implements Extractor {
   private final ParsableByteArray nalPrefix;
   private final ParsableByteArray nalBuffer;
   private final ParsableByteArray encryptionSignalByte;
+  private final ParsableByteArray defaultInitializationVector;
 
   // Adjusts sample timestamps.
   private final TimestampAdjuster timestampAdjuster;
@@ -197,6 +198,7 @@ public final class FragmentedMp4Extractor implements Extractor {
     nalPrefix = new ParsableByteArray(5);
     nalBuffer = new ParsableByteArray();
     encryptionSignalByte = new ParsableByteArray(1);
+    defaultInitializationVector = new ParsableByteArray();
     extendedTypeScratch = new byte[16];
     containerAtoms = new Stack<>();
     pendingMetadataSampleInfos = new LinkedList<>();
@@ -559,11 +561,12 @@ public final class FragmentedMp4Extractor implements Extractor {
 
     parseTruns(traf, trackBundle, decodeTime, flags);
 
+    TrackEncryptionBox encryptionBox = trackBundle.track
+        .getSampleDescriptionEncryptionBox(fragment.header.sampleDescriptionIndex);
+
     LeafAtom saiz = traf.getLeafAtomOfType(Atom.TYPE_saiz);
     if (saiz != null) {
-      TrackEncryptionBox trackEncryptionBox = trackBundle.track
-          .sampleDescriptionEncryptionBoxes[fragment.header.sampleDescriptionIndex];
-      parseSaiz(trackEncryptionBox, saiz.data, fragment);
+      parseSaiz(encryptionBox, saiz.data, fragment);
     }
 
     LeafAtom saio = traf.getLeafAtomOfType(Atom.TYPE_saio);
@@ -579,7 +582,8 @@ public final class FragmentedMp4Extractor implements Extractor {
     LeafAtom sbgp = traf.getLeafAtomOfType(Atom.TYPE_sbgp);
     LeafAtom sgpd = traf.getLeafAtomOfType(Atom.TYPE_sgpd);
     if (sbgp != null && sgpd != null) {
-      parseSgpd(sbgp.data, sgpd.data, fragment);
+      parseSgpd(sbgp.data, sgpd.data, encryptionBox != null ? encryptionBox.schemeType : null,
+          fragment);
     }
 
     int leafChildrenSize = traf.leafChildren.size();
@@ -868,8 +872,8 @@ public final class FragmentedMp4Extractor implements Extractor {
     out.fillEncryptionData(senc);
   }
 
-  private static void parseSgpd(ParsableByteArray sbgp, ParsableByteArray sgpd, TrackFragment out)
-      throws ParserException {
+  private static void parseSgpd(ParsableByteArray sbgp, ParsableByteArray sgpd, String schemeType,
+      TrackFragment out) throws ParserException {
     sbgp.setPosition(Atom.HEADER_SIZE);
     int sbgpFullAtom = sbgp.readInt();
     if (sbgp.readInt() != SAMPLE_GROUP_TYPE_seig) {
@@ -877,9 +881,9 @@ public final class FragmentedMp4Extractor implements Extractor {
       return;
     }
     if (Atom.parseFullAtomVersion(sbgpFullAtom) == 1) {
-      sbgp.skipBytes(4);
+      sbgp.skipBytes(4); // default_length.
     }
-    if (sbgp.readInt() != 1) {
+    if (sbgp.readInt() != 1) { // entry_count.
       throw new ParserException("Entry count in sbgp != 1 (unsupported).");
     }
 
@@ -892,25 +896,35 @@ public final class FragmentedMp4Extractor implements Extractor {
     int sgpdVersion = Atom.parseFullAtomVersion(sgpdFullAtom);
     if (sgpdVersion == 1) {
       if (sgpd.readUnsignedInt() == 0) {
-        throw new ParserException("Variable length decription in sgpd found (unsupported)");
+        throw new ParserException("Variable length description in sgpd found (unsupported)");
       }
     } else if (sgpdVersion >= 2) {
-      sgpd.skipBytes(4);
+      sgpd.skipBytes(4); // default_sample_description_index.
     }
-    if (sgpd.readUnsignedInt() != 1) {
+    if (sgpd.readUnsignedInt() != 1) { // entry_count.
       throw new ParserException("Entry count in sgpd != 1 (unsupported).");
     }
     // CencSampleEncryptionInformationGroupEntry
-    sgpd.skipBytes(2);
+    sgpd.skipBytes(1); // reserved = 0.
+    int patternByte = sgpd.readUnsignedByte();
+    int cryptByteBlock = (patternByte & 0xF0) >> 4;
+    int skipByteBlock = patternByte & 0x0F;
     boolean isProtected = sgpd.readUnsignedByte() == 1;
     if (!isProtected) {
       return;
     }
-    int initVectorSize = sgpd.readUnsignedByte();
+    int perSampleIvSize = sgpd.readUnsignedByte();
     byte[] keyId = new byte[16];
     sgpd.readBytes(keyId, 0, keyId.length);
+    byte[] constantIv = null;
+    if (isProtected && perSampleIvSize == 0) {
+      int constantIvSize = sgpd.readUnsignedByte();
+      constantIv = new byte[constantIvSize];
+      sgpd.readBytes(constantIv, 0, constantIvSize);
+    }
     out.definesEncryptionData = true;
-    out.trackEncryptionBox = new TrackEncryptionBox(isProtected, initVectorSize, keyId);
+    out.trackEncryptionBox = new TrackEncryptionBox(isProtected, schemeType, perSampleIvSize, keyId,
+        cryptByteBlock, skipByteBlock, constantIv);
   }
 
   /**
@@ -1126,24 +1140,18 @@ public final class FragmentedMp4Extractor implements Extractor {
       sampleTimeUs = timestampAdjuster.adjustSampleTimestamp(sampleTimeUs);
     }
 
-    @C.BufferFlags int sampleFlags = (fragment.definesEncryptionData ? C.BUFFER_FLAG_ENCRYPTED : 0)
-        | (fragment.sampleIsSyncFrameTable[sampleIndex] ? C.BUFFER_FLAG_KEY_FRAME : 0);
+    @C.BufferFlags int sampleFlags = fragment.sampleIsSyncFrameTable[sampleIndex]
+        ? C.BUFFER_FLAG_KEY_FRAME : 0;
 
     // Encryption data.
     TrackOutput.CryptoData cryptoData = null;
-    TrackEncryptionBox encryptionBox = null;
     if (fragment.definesEncryptionData) {
-      encryptionBox = fragment.trackEncryptionBox != null
+      sampleFlags |= C.BUFFER_FLAG_ENCRYPTED;
+      TrackEncryptionBox encryptionBox = fragment.trackEncryptionBox != null
           ? fragment.trackEncryptionBox
-          : track.sampleDescriptionEncryptionBoxes[fragment.header.sampleDescriptionIndex];
-      if (encryptionBox != currentTrackBundle.cachedEncryptionBox) {
-        cryptoData = new TrackOutput.CryptoData(C.CRYPTO_MODE_AES_CTR, encryptionBox.keyId);
-      } else {
-        cryptoData = currentTrackBundle.cachedCryptoData;
-      }
+          : track.getSampleDescriptionEncryptionBox(fragment.header.sampleDescriptionIndex);
+      cryptoData = encryptionBox.cryptoData;
     }
-    currentTrackBundle.cachedCryptoData = cryptoData;
-    currentTrackBundle.cachedEncryptionBox = encryptionBox;
 
     output.sampleMetadata(sampleTimeUs, sampleFlags, sampleSize, 0, cryptoData);
 
@@ -1201,12 +1209,24 @@ public final class FragmentedMp4Extractor implements Extractor {
    */
   private int appendSampleEncryptionData(TrackBundle trackBundle) {
     TrackFragment trackFragment = trackBundle.fragment;
-    ParsableByteArray sampleEncryptionData = trackFragment.sampleEncryptionData;
     int sampleDescriptionIndex = trackFragment.header.sampleDescriptionIndex;
     TrackEncryptionBox encryptionBox = trackFragment.trackEncryptionBox != null
         ? trackFragment.trackEncryptionBox
-        : trackBundle.track.sampleDescriptionEncryptionBoxes[sampleDescriptionIndex];
-    int vectorSize = encryptionBox.initializationVectorSize;
+        : trackBundle.track.getSampleDescriptionEncryptionBox(sampleDescriptionIndex);
+
+    ParsableByteArray initializationVectorData;
+    int vectorSize;
+    if (encryptionBox.initializationVectorSize != 0) {
+      initializationVectorData = trackFragment.sampleEncryptionData;
+      vectorSize = encryptionBox.initializationVectorSize;
+    } else {
+      // The default initialization vector should be used.
+      byte[] initVectorData = encryptionBox.defaultInitializationVector;
+      defaultInitializationVector.reset(initVectorData, initVectorData.length);
+      initializationVectorData = defaultInitializationVector;
+      vectorSize = initVectorData.length;
+    }
+
     boolean subsampleEncryption = trackFragment
         .sampleHasSubsampleEncryptionTable[trackBundle.currentSampleIndex];
 
@@ -1216,19 +1236,19 @@ public final class FragmentedMp4Extractor implements Extractor {
     TrackOutput output = trackBundle.output;
     output.sampleData(encryptionSignalByte, 1);
     // Write the vector.
-    output.sampleData(sampleEncryptionData, vectorSize);
+    output.sampleData(initializationVectorData, vectorSize);
     // If we don't have subsample encryption data, we're done.
     if (!subsampleEncryption) {
       return 1 + vectorSize;
     }
     // Write the subsample encryption data.
-    int subsampleCount = sampleEncryptionData.readUnsignedShort();
-    sampleEncryptionData.skipBytes(-2);
+    ParsableByteArray subsampleEncryptionData = trackFragment.sampleEncryptionData;
+    int subsampleCount = subsampleEncryptionData.readUnsignedShort();
+    subsampleEncryptionData.skipBytes(-2);
     int subsampleDataLength = 2 + 6 * subsampleCount;
-    output.sampleData(sampleEncryptionData, subsampleDataLength);
+    output.sampleData(subsampleEncryptionData, subsampleDataLength);
     return 1 + vectorSize + subsampleDataLength;
   }
-
 
   /** Returns DrmInitData from leaf atoms. */
   private static DrmInitData getDrmInitDataFromAtoms(List<Atom.LeafAtom> leafChildren) {
@@ -1245,7 +1265,7 @@ public final class FragmentedMp4Extractor implements Extractor {
         if (uuid == null) {
           Log.w(TAG, "Skipped pssh atom (failed to extract uuid)");
         } else {
-          schemeDatas.add(new SchemeData(uuid, MimeTypes.VIDEO_MP4, psshData));
+          schemeDatas.add(new SchemeData(uuid, null, MimeTypes.VIDEO_MP4, psshData));
         }
       }
     }
@@ -1299,10 +1319,6 @@ public final class FragmentedMp4Extractor implements Extractor {
     public int currentSampleInTrackRun;
     public int currentTrackRunIndex;
 
-    // Auxiliary references.
-    public TrackOutput.CryptoData cachedCryptoData;
-    public TrackEncryptionBox cachedEncryptionBox;
-
     public TrackBundle(TrackOutput output) {
       fragment = new TrackFragment();
       this.output = output;
@@ -1320,13 +1336,15 @@ public final class FragmentedMp4Extractor implements Extractor {
       currentSampleIndex = 0;
       currentTrackRunIndex = 0;
       currentSampleInTrackRun = 0;
-      cachedCryptoData = null;
-      cachedEncryptionBox = null;
     }
 
     public void updateDrmInitData(DrmInitData drmInitData) {
-      output.format(track.format.copyWithDrmInitData(drmInitData));
+      TrackEncryptionBox encryptionBox =
+          track.getSampleDescriptionEncryptionBox(fragment.header.sampleDescriptionIndex);
+      String schemeType = encryptionBox != null ? encryptionBox.schemeType : null;
+      output.format(track.format.copyWithDrmInitData(drmInitData.copyWithSchemeType(schemeType)));
     }
+
   }
 
 }

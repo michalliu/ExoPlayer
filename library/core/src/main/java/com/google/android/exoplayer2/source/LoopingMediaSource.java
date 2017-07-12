@@ -76,10 +76,10 @@ public final class LoopingMediaSource implements MediaSource {
   }
 
   @Override
-  public MediaPeriod createPeriod(int index, Allocator allocator) {
+  public MediaPeriod createPeriod(MediaPeriodId id, Allocator allocator) {
     return loopCount != Integer.MAX_VALUE
-        ? childSource.createPeriod(index % childPeriodCount, allocator)
-        : childSource.createPeriod(index, allocator);
+        ? childSource.createPeriod(new MediaPeriodId(id.periodIndex % childPeriodCount), allocator)
+        : childSource.createPeriod(id, allocator);
   }
 
   @Override
@@ -141,10 +141,8 @@ public final class LoopingMediaSource implements MediaSource {
     }
 
     private void getChildDataByChildIndex(int childIndex, ChildDataHolder childData) {
-      childData.timeline = childTimeline;
-      childData.firstPeriodIndexInChild = childIndex * childPeriodCount;
-      childData.firstWindowIndexInChild = childIndex * childWindowCount;
-      childData.uid = childIndex;
+      childData.setData(childTimeline, childIndex * childPeriodCount, childIndex * childWindowCount,
+          childIndex);
     }
 
   }

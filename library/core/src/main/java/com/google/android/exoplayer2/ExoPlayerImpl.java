@@ -24,6 +24,7 @@ import android.util.Log;
 import com.google.android.exoplayer2.ExoPlayerImplInternal.PlaybackInfo;
 import com.google.android.exoplayer2.ExoPlayerImplInternal.SourceInfo;
 import com.google.android.exoplayer2.source.MediaSource;
+import com.google.android.exoplayer2.source.MediaSource.MediaPeriodId;
 import com.google.android.exoplayer2.source.TrackGroupArray;
 import com.google.android.exoplayer2.trackselection.TrackSelection;
 import com.google.android.exoplayer2.trackselection.TrackSelectionArray;
@@ -104,6 +105,11 @@ import java.util.concurrent.CopyOnWriteArraySet;
     playbackInfo = new ExoPlayerImplInternal.PlaybackInfo(0, 0);
     internalPlayer = new ExoPlayerImplInternal(renderers, trackSelector, loadControl, playWhenReady,
         repeatMode, eventHandler, playbackInfo, this);
+  }
+
+  @Override
+  public Looper getPlaybackLooper() {
+    return internalPlayer.getPlaybackLooper();
   }
 
   @Override
@@ -276,7 +282,7 @@ import java.util.concurrent.CopyOnWriteArraySet;
     if (timeline.isEmpty() || pendingSeekAcks > 0) {
       return maskingPeriodIndex;
     } else {
-      return playbackInfo.periodIndex;
+      return playbackInfo.periodId.periodIndex;
     }
   }
 
@@ -285,7 +291,7 @@ import java.util.concurrent.CopyOnWriteArraySet;
     if (timeline.isEmpty() || pendingSeekAcks > 0) {
       return maskingWindowIndex;
     } else {
-      return timeline.getPeriod(playbackInfo.periodIndex, period).windowIndex;
+      return timeline.getPeriod(playbackInfo.periodId.periodIndex, period).windowIndex;
     }
   }
 
@@ -294,7 +300,14 @@ import java.util.concurrent.CopyOnWriteArraySet;
     if (timeline.isEmpty()) {
       return C.TIME_UNSET;
     }
-    return timeline.getWindow(getCurrentWindowIndex(), window).getDurationMs();
+    if (isPlayingAd()) {
+      MediaPeriodId periodId = playbackInfo.periodId;
+      timeline.getPeriod(periodId.periodIndex, period);
+      long adDurationUs = period.getAdDurationUs(periodId.adGroupIndex, periodId.adIndexInAdGroup);
+      return C.usToMs(adDurationUs);
+    } else {
+      return timeline.getWindow(getCurrentWindowIndex(), window).getDurationMs();
+    }
   }
 
   @Override
@@ -302,7 +315,7 @@ import java.util.concurrent.CopyOnWriteArraySet;
     if (timeline.isEmpty() || pendingSeekAcks > 0) {
       return maskingWindowPositionMs;
     } else {
-      timeline.getPeriod(playbackInfo.periodIndex, period);
+      timeline.getPeriod(playbackInfo.periodId.periodIndex, period);
       return period.getPositionInWindowMs() + C.usToMs(playbackInfo.positionUs);
     }
   }
@@ -313,7 +326,7 @@ import java.util.concurrent.CopyOnWriteArraySet;
     if (timeline.isEmpty() || pendingSeekAcks > 0) {
       return maskingWindowPositionMs;
     } else {
-      timeline.getPeriod(playbackInfo.periodIndex, period);
+      timeline.getPeriod(playbackInfo.periodId.periodIndex, period);
       return period.getPositionInWindowMs() + C.usToMs(playbackInfo.bufferedPositionUs);
     }
   }
@@ -337,6 +350,21 @@ import java.util.concurrent.CopyOnWriteArraySet;
   @Override
   public boolean isCurrentWindowSeekable() {
     return !timeline.isEmpty() && timeline.getWindow(getCurrentWindowIndex(), window).isSeekable;
+  }
+
+  @Override
+  public boolean isPlayingAd() {
+    return pendingSeekAcks == 0 && playbackInfo.periodId.adGroupIndex != C.INDEX_UNSET;
+  }
+
+  @Override
+  public int getCurrentAdGroupIndex() {
+    return pendingSeekAcks == 0 ? playbackInfo.periodId.adGroupIndex : C.INDEX_UNSET;
+  }
+
+  @Override
+  public int getCurrentAdIndexInAdGroup() {
+    return pendingSeekAcks == 0 ? playbackInfo.periodId.adIndexInAdGroup : C.INDEX_UNSET;
   }
 
   @Override

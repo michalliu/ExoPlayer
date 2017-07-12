@@ -284,6 +284,13 @@ public interface ExoPlayer {
   int REPEAT_MODE_ALL = 2;
 
   /**
+   * Gets the {@link Looper} associated with the playback thread.
+   *
+   * @return The {@link Looper} associated with the playback thread.
+   */
+  Looper getPlaybackLooper();
+
+  /**
    * Register a listener to receive events from the player. The listener's methods will be called on
    * the thread that was used to construct the player. However, if the thread used to construct the
    * player does not have a {@link Looper}, then the listener will be called on the main thread.
@@ -538,5 +545,22 @@ public interface ExoPlayer {
    * @see Timeline.Window#isSeekable
    */
   boolean isCurrentWindowSeekable();
+
+  /**
+   * Returns whether the player is currently playing an ad.
+   */
+  boolean isPlayingAd();
+
+  /**
+   * If {@link #isPlayingAd()} returns true, returns the index of the ad group in the period
+   * currently being played. Returns {@link C#INDEX_UNSET} otherwise.
+   */
+  int getCurrentAdGroupIndex();
+
+  /**
+   * If {@link #isPlayingAd()} returns true, returns the index of the ad in its ad group. Returns
+   * {@link C#INDEX_UNSET} otherwise.
+   */
+  int getCurrentAdIndexInAdGroup();
 
 }

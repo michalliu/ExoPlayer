@@ -18,9 +18,11 @@ package com.google.android.exoplayer2.source;
 import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.ExoPlayer;
 import com.google.android.exoplayer2.Timeline;
-import com.google.android.exoplayer2.TimelineTest;
-import com.google.android.exoplayer2.TimelineTest.FakeTimeline;
-import com.google.android.exoplayer2.TimelineTest.TimelineVerifier;
+import com.google.android.exoplayer2.testutil.FakeMediaSource;
+import com.google.android.exoplayer2.testutil.FakeTimeline;
+import com.google.android.exoplayer2.testutil.FakeTimeline.TimelineWindowDefinition;
+import com.google.android.exoplayer2.testutil.TestUtil;
+import com.google.android.exoplayer2.testutil.TimelineAsserts;
 import junit.framework.TestCase;
 
 /**
@@ -29,68 +31,69 @@ import junit.framework.TestCase;
 public final class ConcatenatingMediaSourceTest extends TestCase {
 
   public void testSingleMediaSource() {
-    Timeline timeline = getConcatenatedTimeline(false, new FakeTimeline(3, 111));
-    new TimelineVerifier(timeline)
-        .assertWindowIds(111)
-        .assertPeriodCounts(3)
-        .assertPreviousWindowIndices(ExoPlayer.REPEAT_MODE_OFF, C.INDEX_UNSET)
-        .assertPreviousWindowIndices(ExoPlayer.REPEAT_MODE_ONE, 0)
-        .assertPreviousWindowIndices(ExoPlayer.REPEAT_MODE_ALL, 0)
-        .assertNextWindowIndices(ExoPlayer.REPEAT_MODE_OFF, C.INDEX_UNSET)
-        .assertNextWindowIndices(ExoPlayer.REPEAT_MODE_ONE, 0)
-        .assertNextWindowIndices(ExoPlayer.REPEAT_MODE_ALL, 0);
+    Timeline timeline = getConcatenatedTimeline(false, createFakeTimeline(3, 111));
+    TimelineAsserts.assertWindowIds(timeline, 111);
+    TimelineAsserts.assertPeriodCounts(timeline, 3);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_OFF, C.INDEX_UNSET);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ONE, 0);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ALL, 0);
+    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_OFF, C.INDEX_UNSET);
+    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ONE, 0);
+    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ALL, 0);
 
-    timeline = getConcatenatedTimeline(true, new FakeTimeline(3, 111));
-    new TimelineVerifier(timeline)
-        .assertWindowIds(111)
-        .assertPeriodCounts(3)
-        .assertPreviousWindowIndices(ExoPlayer.REPEAT_MODE_OFF, C.INDEX_UNSET)
-        .assertPreviousWindowIndices(ExoPlayer.REPEAT_MODE_ONE, 0)
-        .assertPreviousWindowIndices(ExoPlayer.REPEAT_MODE_ALL, 0)
-        .assertNextWindowIndices(ExoPlayer.REPEAT_MODE_OFF, C.INDEX_UNSET)
-        .assertNextWindowIndices(ExoPlayer.REPEAT_MODE_ONE, 0)
-        .assertNextWindowIndices(ExoPlayer.REPEAT_MODE_ALL, 0);
+    timeline = getConcatenatedTimeline(true, createFakeTimeline(3, 111));
+    TimelineAsserts.assertWindowIds(timeline, 111);
+    TimelineAsserts.assertPeriodCounts(timeline, 3);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_OFF, C.INDEX_UNSET);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ONE, 0);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ALL, 0);
+    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_OFF, C.INDEX_UNSET);
+    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ONE, 0);
+    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ALL, 0);
   }
 
   public void testMultipleMediaSources() {
-    Timeline[] timelines = { new FakeTimeline(3, 111), new FakeTimeline(1, 222),
-        new FakeTimeline(3, 333) };
+    Timeline[] timelines = { createFakeTimeline(3, 111), createFakeTimeline(1, 222),
+        createFakeTimeline(3, 333) };
     Timeline timeline = getConcatenatedTimeline(false, timelines);
-    new TimelineVerifier(timeline)
-        .assertWindowIds(111, 222, 333)
-        .assertPeriodCounts(3, 1, 3)
-        .assertPreviousWindowIndices(ExoPlayer.REPEAT_MODE_OFF, C.INDEX_UNSET, 0, 1)
-        .assertPreviousWindowIndices(ExoPlayer.REPEAT_MODE_ONE, 0, 1, 2)
-        .assertPreviousWindowIndices(ExoPlayer.REPEAT_MODE_ALL, 2, 0, 1)
-        .assertNextWindowIndices(ExoPlayer.REPEAT_MODE_OFF, 1, 2, C.INDEX_UNSET)
-        .assertNextWindowIndices(ExoPlayer.REPEAT_MODE_ONE, 0, 1, 2)
-        .assertNextWindowIndices(ExoPlayer.REPEAT_MODE_ALL, 1, 2, 0);
+    TimelineAsserts.assertWindowIds(timeline, 111, 222, 333);
+    TimelineAsserts.assertPeriodCounts(timeline, 3, 1, 3);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_OFF, C.INDEX_UNSET,
+        0, 1);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ONE, 0, 1, 2);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ALL, 2, 0, 1);
+    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_OFF,
+        1, 2, C.INDEX_UNSET);
+    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ONE, 0, 1, 2);
+    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ALL, 1, 2, 0);
 
     timeline = getConcatenatedTimeline(true, timelines);
-    new TimelineVerifier(timeline)
-        .assertWindowIds(111, 222, 333)
-        .assertPeriodCounts(3, 1, 3)
-        .assertPreviousWindowIndices(ExoPlayer.REPEAT_MODE_OFF, C.INDEX_UNSET, 0, 1)
-        .assertPreviousWindowIndices(ExoPlayer.REPEAT_MODE_ONE, 2, 0, 1)
-        .assertPreviousWindowIndices(ExoPlayer.REPEAT_MODE_ALL, 2, 0, 1)
-        .assertNextWindowIndices(ExoPlayer.REPEAT_MODE_OFF, 1, 2, C.INDEX_UNSET)
-        .assertNextWindowIndices(ExoPlayer.REPEAT_MODE_ONE, 1, 2, 0)
-        .assertNextWindowIndices(ExoPlayer.REPEAT_MODE_ALL, 1, 2, 0);
+    TimelineAsserts.assertWindowIds(timeline, 111, 222, 333);
+    TimelineAsserts.assertPeriodCounts(timeline, 3, 1, 3);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_OFF,
+        C.INDEX_UNSET, 0, 1);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ONE, 2, 0, 1);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ALL, 2, 0, 1);
+    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_OFF,
+        1, 2, C.INDEX_UNSET);
+    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ONE, 1, 2, 0);
+    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ALL, 1, 2, 0);
   }
 
   public void testNestedMediaSources() {
     Timeline timeline = getConcatenatedTimeline(false,
-        getConcatenatedTimeline(false, new FakeTimeline(1, 111), new FakeTimeline(1, 222)),
-        getConcatenatedTimeline(true, new FakeTimeline(1, 333), new FakeTimeline(1, 444)));
-    new TimelineVerifier(timeline)
-        .assertWindowIds(111, 222, 333, 444)
-        .assertPeriodCounts(1, 1, 1, 1)
-        .assertPreviousWindowIndices(ExoPlayer.REPEAT_MODE_OFF, C.INDEX_UNSET, 0, 1, 2)
-        .assertPreviousWindowIndices(ExoPlayer.REPEAT_MODE_ONE, 0, 1, 3, 2)
-        .assertPreviousWindowIndices(ExoPlayer.REPEAT_MODE_ALL, 3, 0, 1, 2)
-        .assertNextWindowIndices(ExoPlayer.REPEAT_MODE_OFF, 1, 2, 3, C.INDEX_UNSET)
-        .assertNextWindowIndices(ExoPlayer.REPEAT_MODE_ONE, 0, 1, 3, 2)
-        .assertNextWindowIndices(ExoPlayer.REPEAT_MODE_ALL, 1, 2, 3, 0);
+        getConcatenatedTimeline(false, createFakeTimeline(1, 111), createFakeTimeline(1, 222)),
+        getConcatenatedTimeline(true, createFakeTimeline(1, 333), createFakeTimeline(1, 444)));
+    TimelineAsserts.assertWindowIds(timeline, 111, 222, 333, 444);
+    TimelineAsserts.assertPeriodCounts(timeline, 1, 1, 1, 1);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_OFF,
+        C.INDEX_UNSET, 0, 1, 2);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ONE, 0, 1, 3, 2);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ALL, 3, 0, 1, 2);
+    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_OFF,
+        1, 2, 3, C.INDEX_UNSET);
+    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ONE, 0, 1, 3, 2);
+    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ALL, 1, 2, 3, 0);
   }
 
   /**
@@ -101,11 +104,14 @@ public final class ConcatenatingMediaSourceTest extends TestCase {
       Timeline... timelines) {
     MediaSource[] mediaSources = new MediaSource[timelines.length];
     for (int i = 0; i < timelines.length; i++) {
-      mediaSources[i] = TimelineTest.stubMediaSourceSourceWithTimeline(timelines[i]);
+      mediaSources[i] = new FakeMediaSource(timelines[i], null);
     }
-    return TimelineTest.extractTimelineFromMediaSource(
+    return TestUtil.extractTimelineFromMediaSource(
         new ConcatenatingMediaSource(isRepeatOneAtomic, mediaSources));
   }
 
+  private static FakeTimeline createFakeTimeline(int periodCount, int windowId) {
+    return new FakeTimeline(new TimelineWindowDefinition(periodCount, windowId));
+  }
 
 }

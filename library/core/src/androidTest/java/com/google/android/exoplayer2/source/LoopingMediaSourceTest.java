@@ -18,9 +18,11 @@ package com.google.android.exoplayer2.source;
 import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.ExoPlayer;
 import com.google.android.exoplayer2.Timeline;
-import com.google.android.exoplayer2.TimelineTest;
-import com.google.android.exoplayer2.TimelineTest.FakeTimeline;
-import com.google.android.exoplayer2.TimelineTest.TimelineVerifier;
+import com.google.android.exoplayer2.testutil.FakeMediaSource;
+import com.google.android.exoplayer2.testutil.FakeTimeline;
+import com.google.android.exoplayer2.testutil.FakeTimeline.TimelineWindowDefinition;
+import com.google.android.exoplayer2.testutil.TestUtil;
+import com.google.android.exoplayer2.testutil.TimelineAsserts;
 import junit.framework.TestCase;
 
 /**
@@ -31,51 +33,53 @@ public class LoopingMediaSourceTest extends TestCase {
   private final Timeline multiWindowTimeline;
 
   public LoopingMediaSourceTest() {
-    multiWindowTimeline = TimelineTest.extractTimelineFromMediaSource(
-        new ConcatenatingMediaSource(
-            TimelineTest.stubMediaSourceSourceWithTimeline(new FakeTimeline(1, 111)),
-            TimelineTest.stubMediaSourceSourceWithTimeline(new FakeTimeline(1, 222)),
-            TimelineTest.stubMediaSourceSourceWithTimeline(new FakeTimeline(1, 333))));
+    multiWindowTimeline = TestUtil.extractTimelineFromMediaSource(new FakeMediaSource(
+        new FakeTimeline(new TimelineWindowDefinition(1, 111),
+            new TimelineWindowDefinition(1, 222), new TimelineWindowDefinition(1, 333)), null));
   }
 
   public void testSingleLoop() {
     Timeline timeline = getLoopingTimeline(multiWindowTimeline, 1);
-    new TimelineVerifier(timeline)
-        .assertWindowIds(111, 222, 333)
-        .assertPeriodCounts(1, 1, 1)
-        .assertPreviousWindowIndices(ExoPlayer.REPEAT_MODE_OFF, C.INDEX_UNSET, 0, 1)
-        .assertPreviousWindowIndices(ExoPlayer.REPEAT_MODE_ONE, 0, 1, 2)
-        .assertPreviousWindowIndices(ExoPlayer.REPEAT_MODE_ALL, 2, 0, 1)
-        .assertNextWindowIndices(ExoPlayer.REPEAT_MODE_OFF, 1, 2, C.INDEX_UNSET)
-        .assertNextWindowIndices(ExoPlayer.REPEAT_MODE_ONE, 0, 1, 2)
-        .assertNextWindowIndices(ExoPlayer.REPEAT_MODE_ALL, 1, 2, 0);
+    TimelineAsserts.assertWindowIds(timeline, 111, 222, 333);
+    TimelineAsserts.assertPeriodCounts(timeline, 1, 1, 1);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_OFF,
+        C.INDEX_UNSET, 0, 1);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ONE, 0, 1, 2);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ALL, 2, 0, 1);
+    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_OFF,
+        1, 2, C.INDEX_UNSET);
+    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ONE, 0, 1, 2);
+    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ALL, 1, 2, 0);
   }
 
   public void testMultiLoop() {
     Timeline timeline = getLoopingTimeline(multiWindowTimeline, 3);
-    new TimelineVerifier(timeline)
-        .assertWindowIds(111, 222, 333, 111, 222, 333, 111, 222, 333)
-        .assertPeriodCounts(1, 1, 1, 1, 1, 1, 1, 1, 1)
-        .assertPreviousWindowIndices(ExoPlayer.REPEAT_MODE_OFF,
-            C.INDEX_UNSET, 0, 1, 2, 3, 4, 5, 6, 7, 8)
-        .assertPreviousWindowIndices(ExoPlayer.REPEAT_MODE_ONE, 0, 1, 2, 3, 4, 5, 6, 7, 8)
-        .assertPreviousWindowIndices(ExoPlayer.REPEAT_MODE_ALL, 8, 0, 1, 2, 3, 4, 5, 6, 7)
-        .assertNextWindowIndices(ExoPlayer.REPEAT_MODE_OFF, 1, 2, 3, 4, 5, 6, 7, 8, C.INDEX_UNSET)
-        .assertNextWindowIndices(ExoPlayer.REPEAT_MODE_ONE, 0, 1, 2, 3, 4, 5, 6, 7, 8)
-        .assertNextWindowIndices(ExoPlayer.REPEAT_MODE_ALL, 1, 2, 3, 4, 5, 6, 7, 8, 0);
+    TimelineAsserts.assertWindowIds(timeline, 111, 222, 333, 111, 222, 333, 111, 222, 333);
+    TimelineAsserts.assertPeriodCounts(timeline, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_OFF,
+        C.INDEX_UNSET, 0, 1, 2, 3, 4, 5, 6, 7, 8);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ONE,
+        0, 1, 2, 3, 4, 5, 6, 7, 8);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ALL,
+        8, 0, 1, 2, 3, 4, 5, 6, 7);
+    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_OFF,
+        1, 2, 3, 4, 5, 6, 7, 8, C.INDEX_UNSET);
+    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ONE,
+        0, 1, 2, 3, 4, 5, 6, 7, 8);
+    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ALL,
+        1, 2, 3, 4, 5, 6, 7, 8, 0);
   }
 
   public void testInfiniteLoop() {
     Timeline timeline = getLoopingTimeline(multiWindowTimeline, Integer.MAX_VALUE);
-    new TimelineVerifier(timeline)
-        .assertWindowIds(111, 222, 333)
-        .assertPeriodCounts(1, 1, 1)
-        .assertPreviousWindowIndices(ExoPlayer.REPEAT_MODE_OFF, 2, 0, 1)
-        .assertPreviousWindowIndices(ExoPlayer.REPEAT_MODE_ONE, 0, 1, 2)
-        .assertPreviousWindowIndices(ExoPlayer.REPEAT_MODE_ALL, 2, 0, 1)
-        .assertNextWindowIndices(ExoPlayer.REPEAT_MODE_OFF, 1, 2, 0)
-        .assertNextWindowIndices(ExoPlayer.REPEAT_MODE_ONE, 0, 1, 2)
-        .assertNextWindowIndices(ExoPlayer.REPEAT_MODE_ALL, 1, 2, 0);
+    TimelineAsserts.assertWindowIds(timeline, 111, 222, 333);
+    TimelineAsserts.assertPeriodCounts(timeline, 1, 1, 1);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_OFF, 2, 0, 1);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ONE, 0, 1, 2);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ALL, 2, 0, 1);
+    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_OFF, 1, 2, 0);
+    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ONE, 0, 1, 2);
+    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ALL, 1, 2, 0);
   }
 
   /**
@@ -83,8 +87,8 @@ public class LoopingMediaSourceTest extends TestCase {
    * the looping timeline.
    */
   private static Timeline getLoopingTimeline(Timeline timeline, int loopCount) {
-    MediaSource mediaSource = TimelineTest.stubMediaSourceSourceWithTimeline(timeline);
-    return TimelineTest.extractTimelineFromMediaSource(
+    MediaSource mediaSource = new FakeMediaSource(timeline, null);
+    return TestUtil.extractTimelineFromMediaSource(
         new LoopingMediaSource(mediaSource, loopCount));
   }
 

@@ -268,7 +268,7 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer {
   @Override
   public boolean isReady() {
     if (super.isReady() && (renderedFirstFrame || (dummySurface != null && surface == dummySurface)
-        || getCodec() == null)) {
+        || getCodec() == null || tunneling)) {
       // Ready. If we were joining then we've now joined, so clear the joining deadline.
       joiningDeadlineMs = C.TIME_UNSET;
       return true;
@@ -290,11 +290,11 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer {
     super.onStarted();
     droppedFrames = 0;
     droppedFrameAccumulationStartTimeMs = SystemClock.elapsedRealtime();
-    joiningDeadlineMs = C.TIME_UNSET;
   }
 
   @Override
   protected void onStopped() {
+    joiningDeadlineMs = C.TIME_UNSET;
     maybeNotifyDroppedFrames();
     super.onStopped();
   }
@@ -700,9 +700,10 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer {
   }
 
   private void maybeNotifyVideoSizeChanged() {
-    if (reportedWidth != currentWidth || reportedHeight != currentHeight
+    if ((currentWidth != Format.NO_VALUE || currentHeight != Format.NO_VALUE)
+      && (reportedWidth != currentWidth || reportedHeight != currentHeight
         || reportedUnappliedRotationDegrees != currentUnappliedRotationDegrees
-        || reportedPixelWidthHeightRatio != currentPixelWidthHeightRatio) {
+        || reportedPixelWidthHeightRatio != currentPixelWidthHeightRatio)) {
       eventDispatcher.videoSizeChanged(currentWidth, currentHeight, currentUnappliedRotationDegrees,
           currentPixelWidthHeightRatio);
       reportedWidth = currentWidth;
@@ -714,8 +715,8 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer {
 
   private void maybeRenotifyVideoSizeChanged() {
     if (reportedWidth != Format.NO_VALUE || reportedHeight != Format.NO_VALUE) {
-      eventDispatcher.videoSizeChanged(currentWidth, currentHeight, currentUnappliedRotationDegrees,
-          currentPixelWidthHeightRatio);
+      eventDispatcher.videoSizeChanged(reportedWidth, reportedHeight,
+          reportedUnappliedRotationDegrees, reportedPixelWidthHeightRatio);
     }
   }
 

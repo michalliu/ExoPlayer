@@ -91,11 +91,11 @@ public final class ConcatenatingMediaSource implements MediaSource {
   }
 
   @Override
-  public MediaPeriod createPeriod(int index, Allocator allocator) {
-    int sourceIndex = timeline.getChildIndexByPeriodIndex(index);
-    int periodIndexInSource = index - timeline.getFirstPeriodIndexInChild(sourceIndex);
-    MediaPeriod mediaPeriod =
-        mediaSources[sourceIndex].createPeriod(periodIndexInSource, allocator);
+  public MediaPeriod createPeriod(MediaPeriodId id, Allocator allocator) {
+    int sourceIndex = timeline.getChildIndexByPeriodIndex(id.periodIndex);
+    MediaPeriodId periodIdInSource =
+        new MediaPeriodId(id.periodIndex - timeline.getFirstPeriodIndexInChild(sourceIndex));
+    MediaPeriod mediaPeriod = mediaSources[sourceIndex].createPeriod(periodIdInSource, allocator);
     sourceIndexByMediaPeriod.put(mediaPeriod, sourceIndex);
     return mediaPeriod;
   }
@@ -231,10 +231,8 @@ public final class ConcatenatingMediaSource implements MediaSource {
     }
 
     private void getChildDataByChildIndex(int childIndex, ChildDataHolder childData) {
-      childData.timeline = timelines[childIndex];
-      childData.firstPeriodIndexInChild = getFirstPeriodIndexInChild(childIndex);
-      childData.firstWindowIndexInChild = getFirstWindowIndexInChild(childIndex);
-      childData.uid = childIndex;
+      childData.setData(timelines[childIndex], getFirstPeriodIndexInChild(childIndex),
+          getFirstWindowIndexInChild(childIndex), childIndex);
     }
 
     private int getChildIndexByPeriodIndex(int periodIndex) {

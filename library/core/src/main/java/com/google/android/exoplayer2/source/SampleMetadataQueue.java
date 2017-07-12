@@ -35,7 +35,6 @@ import com.google.android.exoplayer2.util.Util;
 
     public int size;
     public long offset;
-    public long nextOffset;
     public CryptoData cryptoData;
 
   }
@@ -54,9 +53,9 @@ import com.google.android.exoplayer2.util.Util;
   private int length;
   private int absoluteStartIndex;
   private int relativeStartIndex;
-  private int relativeEndIndex;
+  private int readPosition;
 
-  private long largestDequeuedTimestampUs;
+  private long largestDiscardedTimestampUs;
   private long largestQueuedTimestampUs;
   private boolean upstreamKeyframeRequired;
   private boolean upstreamFormatRequired;
@@ -72,24 +71,19 @@ import com.google.android.exoplayer2.util.Util;
     sizes = new int[capacity];
     cryptoDatas = new CryptoData[capacity];
     formats = new Format[capacity];
-    largestDequeuedTimestampUs = Long.MIN_VALUE;
+    largestDiscardedTimestampUs = Long.MIN_VALUE;
     largestQueuedTimestampUs = Long.MIN_VALUE;
     upstreamFormatRequired = true;
     upstreamKeyframeRequired = true;
   }
 
   public void clearSampleData() {
+    length = 0;
     absoluteStartIndex = 0;
     relativeStartIndex = 0;
-    relativeEndIndex = 0;
-    length = 0;
+    readPosition = 0;
     upstreamKeyframeRequired = true;
-  }
-
-  // Called by the consuming thread, but only when there is no loading thread.
-
-  public void resetLargestParsedTimestamps() {
-    largestDequeuedTimestampUs = Long.MIN_VALUE;
+    largestDiscardedTimestampUs = Long.MIN_VALUE;
     largestQueuedTimestampUs = Long.MIN_VALUE;
   }
 
@@ -101,37 +95,23 @@ import com.google.android.exoplayer2.util.Util;
   }
 
   /**
-   * Discards samples from the write side of the buffer.
+   * Discards samples from the write side of the queue.
    *
    * @param discardFromIndex The absolute index of the first sample to be discarded.
-   * @return The reduced total number of bytes written, after the samples have been discarded.
+   * @return The reduced total number of bytes written after the samples have been discarded, or 0
+   *     if the queue is now empty.
    */
   public long discardUpstreamSamples(int discardFromIndex) {
     int discardCount = getWriteIndex() - discardFromIndex;
-    Assertions.checkArgument(0 <= discardCount && discardCount <= length);
-
-    if (discardCount == 0) {
-      if (absoluteStartIndex == 0 && length == 0) {
-        // Nothing has been written to the queue.
-        return 0;
-      }
-      int lastWriteIndex = (relativeEndIndex == 0 ? capacity : relativeEndIndex) - 1;
-      return offsets[lastWriteIndex] + sizes[lastWriteIndex];
-    }
-
+    Assertions.checkArgument(0 <= discardCount && discardCount <= (length - readPosition));
     length -= discardCount;
-    relativeEndIndex = (relativeEndIndex + capacity - discardCount) % capacity;
-    // Update the largest queued timestamp, assuming that the timestamps prior to a keyframe are
-    // always less than the timestamp of the keyframe itself, and of subsequent frames.
-    largestQueuedTimestampUs = Long.MIN_VALUE;
-    for (int i = length - 1; i >= 0; i--) {
-      int sampleIndex = (relativeStartIndex + i) % capacity;
-      largestQueuedTimestampUs = Math.max(largestQueuedTimestampUs, timesUs[sampleIndex]);
-      if ((flags[sampleIndex] & C.BUFFER_FLAG_KEY_FRAME) != 0) {
-        break;
-      }
+    largestQueuedTimestampUs = Math.max(largestDiscardedTimestampUs, getLargestTimestamp(length));
+    if (length == 0) {
+      return 0;
+    } else {
+      int relativeLastWriteIndex = getRelativeIndex(length - 1);
+      return offsets[relativeLastWriteIndex] + sizes[relativeLastWriteIndex];
     }
-    return offsets[relativeEndIndex];
   }
 
   public void sourceId(int sourceId) {
@@ -144,22 +124,25 @@ import com.google.android.exoplayer2.util.Util;
    * Returns the current absolute read index.
    */
   public int getReadIndex() {
-    return absoluteStartIndex;
+    return absoluteStartIndex + readPosition;
   }
 
   /**
-   * Peeks the source id of the next sample, or the current upstream source id if
-   * {@link #hasNextSample()} is {@code false}.
+   * Peeks the source id of the next sample to be read, or the current upstream source id if the
+   * queue is empty or if the read position is at the end of the queue.
+   *
+   * @return The source id.
    */
   public int peekSourceId() {
-    return hasNextSample() ? sourceIds[relativeStartIndex] : upstreamSourceId;
+    int relativeReadIndex = getRelativeIndex(readPosition);
+    return hasNextSample() ? sourceIds[relativeReadIndex] : upstreamSourceId;
   }
 
   /**
    * Returns whether a sample is available to be read.
    */
   public synchronized boolean hasNextSample() {
-    return length != 0;
+    return readPosition != length;
   }
 
   /**
@@ -181,7 +164,14 @@ import com.google.android.exoplayer2.util.Util;
    *     samples have been queued.
    */
   public synchronized long getLargestQueuedTimestampUs() {
-    return Math.max(largestDequeuedTimestampUs, largestQueuedTimestampUs);
+    return largestQueuedTimestampUs;
+  }
+
+  /**
+   * Rewinds the read position to the first sample retained in the queue.
+   */
+  public synchronized void rewind() {
+    readPosition = 0;
   }
 
   /**
@@ -206,7 +196,7 @@ import com.google.android.exoplayer2.util.Util;
    *     or {@link C#RESULT_BUFFER_READ}.
    */
   @SuppressWarnings("ReferenceEquality")
-  public synchronized int readData(FormatHolder formatHolder, DecoderInputBuffer buffer,
+  public synchronized int read(FormatHolder formatHolder, DecoderInputBuffer buffer,
       boolean formatRequired, boolean loadingFinished, Format downstreamFormat,
       SampleExtrasHolder extrasHolder) {
     if (!hasNextSample()) {
@@ -222,8 +212,9 @@ import com.google.android.exoplayer2.util.Util;
       }
     }
 
-    if (formatRequired || formats[relativeStartIndex] != downstreamFormat) {
-      formatHolder.format = formats[relativeStartIndex];
+    int relativeReadIndex = getRelativeIndex(readPosition);
+    if (formatRequired || formats[relativeReadIndex] != downstreamFormat) {
+      formatHolder.format = formats[relativeReadIndex];
       return C.RESULT_FORMAT_READ;
     }
 
@@ -231,90 +222,101 @@ import com.google.android.exoplayer2.util.Util;
       return C.RESULT_NOTHING_READ;
     }
 
-    buffer.timeUs = timesUs[relativeStartIndex];
-    buffer.setFlags(flags[relativeStartIndex]);
-    extrasHolder.size = sizes[relativeStartIndex];
-    extrasHolder.offset = offsets[relativeStartIndex];
-    extrasHolder.cryptoData = cryptoDatas[relativeStartIndex];
+    buffer.timeUs = timesUs[relativeReadIndex];
+    buffer.setFlags(flags[relativeReadIndex]);
+    extrasHolder.size = sizes[relativeReadIndex];
+    extrasHolder.offset = offsets[relativeReadIndex];
+    extrasHolder.cryptoData = cryptoDatas[relativeReadIndex];
 
-    largestDequeuedTimestampUs = Math.max(largestDequeuedTimestampUs, buffer.timeUs);
-    length--;
-    relativeStartIndex++;
-    absoluteStartIndex++;
-    if (relativeStartIndex == capacity) {
-      // Wrap around.
-      relativeStartIndex = 0;
-    }
-
-    extrasHolder.nextOffset = length > 0 ? offsets[relativeStartIndex]
-        : extrasHolder.offset + extrasHolder.size;
+    readPosition++;
     return C.RESULT_BUFFER_READ;
   }
 
   /**
-   * Skips all samples in the buffer.
+   * Attempts to advance the read position to the sample before or at the specified time.
    *
-   * @return The offset up to which data should be dropped, or {@link C#POSITION_UNSET} if no
-   *     dropping of data is required.
+   * @param timeUs The time to advance to.
+   * @param toKeyframe If true then attempts to advance to the keyframe before or at the specified
+   *     time, rather than to any sample before or at that time.
+   * @param allowTimeBeyondBuffer Whether the operation can succeed if {@code timeUs} is beyond the
+   *     end of the queue, by advancing the read position to the last sample (or keyframe) in the
+   *     queue.
+   * @return Whether the operation was a success. A successful advance is one in which the read
+   *     position was unchanged or advanced, and is now at a sample meeting the specified criteria.
    */
-  public synchronized long skipAll() {
-    if (!hasNextSample()) {
-      return C.POSITION_UNSET;
+  public synchronized boolean advanceTo(long timeUs, boolean toKeyframe,
+      boolean allowTimeBeyondBuffer) {
+    int relativeReadIndex = getRelativeIndex(readPosition);
+    if (!hasNextSample() || timeUs < timesUs[relativeReadIndex]
+        || (timeUs > largestQueuedTimestampUs && !allowTimeBeyondBuffer)) {
+      return false;
     }
-
-    int lastSampleIndex = (relativeStartIndex + length - 1) % capacity;
-    relativeStartIndex = (relativeStartIndex + length) % capacity;
-    absoluteStartIndex += length;
-    length = 0;
-    return offsets[lastSampleIndex] + sizes[lastSampleIndex];
+    int offset = findSampleBefore(relativeReadIndex, length - readPosition, timeUs, toKeyframe);
+    if (offset == -1) {
+      return false;
+    }
+    readPosition += offset;
+    return true;
   }
 
   /**
-   * Attempts to locate the keyframe before or at the specified time. If
-   * {@code allowTimeBeyondBuffer} is {@code false} then it is also required that {@code timeUs}
-   * falls within the buffer.
-   *
-   * @param timeUs The seek time.
-   * @param allowTimeBeyondBuffer Whether the skip can succeed if {@code timeUs} is beyond the end
-   *     of the buffer.
-   * @return The offset of the keyframe's data if the keyframe was present.
-   *     {@link C#POSITION_UNSET} otherwise.
+   * Advances the read position to the end of the queue.
    */
-  public synchronized long skipToKeyframeBefore(long timeUs, boolean allowTimeBeyondBuffer) {
-    if (!hasNextSample() || timeUs < timesUs[relativeStartIndex]) {
+  public synchronized void advanceToEnd() {
+    if (!hasNextSample()) {
+      return;
+    }
+    readPosition = length;
+  }
+
+  /**
+   * Discards up to but not including the sample immediately before or at the specified time.
+   *
+   * @param timeUs The time to discard up to.
+   * @param toKeyframe If true then discards samples up to the keyframe before or at the specified
+   *     time, rather than just any sample before or at that time.
+   * @param stopAtReadPosition If true then samples are only discarded if they're before the read
+   *     position. If false then samples at and beyond the read position may be discarded, in which
+   *     case the read position is advanced to the first remaining sample.
+   * @return The corresponding offset up to which data should be discarded, or
+   *     {@link C#POSITION_UNSET} if no discarding of data is necessary.
+   */
+  public synchronized long discardTo(long timeUs, boolean toKeyframe, boolean stopAtReadPosition) {
+    if (length == 0 || timeUs < timesUs[relativeStartIndex]) {
       return C.POSITION_UNSET;
     }
-
-    if (timeUs > largestQueuedTimestampUs && !allowTimeBeyondBuffer) {
+    int searchLength = stopAtReadPosition && readPosition != length ? readPosition + 1 : length;
+    int discardCount = findSampleBefore(relativeStartIndex, searchLength, timeUs, toKeyframe);
+    if (discardCount == -1) {
       return C.POSITION_UNSET;
     }
+    return discardSamples(discardCount);
+  }
 
-    // This could be optimized to use a binary search, however in practice callers to this method
-    // often pass times near to the start of the buffer. Hence it's unclear whether switching to
-    // a binary search would yield any real benefit.
-    int sampleCount = 0;
-    int sampleCountToKeyframe = -1;
-    int searchIndex = relativeStartIndex;
-    while (searchIndex != relativeEndIndex) {
-      if (timesUs[searchIndex] > timeUs) {
-        // We've gone too far.
-        break;
-      } else if ((flags[searchIndex] & C.BUFFER_FLAG_KEY_FRAME) != 0) {
-        // We've found a keyframe, and we're still before the seek position.
-        sampleCountToKeyframe = sampleCount;
-      }
-      searchIndex = (searchIndex + 1) % capacity;
-      sampleCount++;
-    }
-
-    if (sampleCountToKeyframe == -1) {
+  /**
+   * Discards samples up to but not including the read position.
+   *
+   * @return The corresponding offset up to which data should be discarded, or
+   *     {@link C#POSITION_UNSET} if no discarding of data is necessary.
+   */
+  public synchronized long discardToRead() {
+    if (readPosition == 0) {
       return C.POSITION_UNSET;
     }
+    return discardSamples(readPosition);
+  }
 
-    relativeStartIndex = (relativeStartIndex + sampleCountToKeyframe) % capacity;
-    absoluteStartIndex += sampleCountToKeyframe;
-    length -= sampleCountToKeyframe;
-    return offsets[relativeStartIndex];
+  /**
+   * Discards all samples in the queue. The read position is also advanced.
+   *
+   * @return The corresponding offset up to which data should be discarded, or
+   *     {@link C#POSITION_UNSET} if no discarding of data is necessary.
+   */
+  public synchronized long discardToEnd() {
+    if (length == 0) {
+      return C.POSITION_UNSET;
+    }
+    return discardSamples(length);
   }
 
   // Called by the loading thread.
@@ -344,6 +346,8 @@ import com.google.android.exoplayer2.util.Util;
     }
     Assertions.checkState(!upstreamFormatRequired);
     commitSampleTimestamp(timeUs);
+
+    int relativeEndIndex = getRelativeIndex(length);
     timesUs[relativeEndIndex] = timeUs;
     offsets[relativeEndIndex] = offset;
     sizes[relativeEndIndex] = size;
@@ -351,7 +355,7 @@ import com.google.android.exoplayer2.util.Util;
     cryptoDatas[relativeEndIndex] = cryptoData;
     formats[relativeEndIndex] = upstreamFormat;
     sourceIds[relativeEndIndex] = upstreamSourceId;
-    // Increment the write index.
+
     length++;
     if (length == capacity) {
       // Increase the capacity.
@@ -387,15 +391,8 @@ import com.google.android.exoplayer2.util.Util;
       formats = newFormats;
       sourceIds = newSourceIds;
       relativeStartIndex = 0;
-      relativeEndIndex = capacity;
       length = capacity;
       capacity = newCapacity;
-    } else {
-      relativeEndIndex++;
-      if (relativeEndIndex == capacity) {
-        // Wrap around.
-        relativeEndIndex = 0;
-      }
     }
   }
 
@@ -404,23 +401,129 @@ import com.google.android.exoplayer2.util.Util;
   }
 
   /**
-   * Attempts to discard samples from the tail of the queue to allow samples starting from the
-   * specified timestamp to be spliced in.
+   * Attempts to discard samples from the end of the queue to allow samples starting from the
+   * specified timestamp to be spliced in. Samples will not be discarded prior to the read position.
    *
    * @param timeUs The timestamp at which the splice occurs.
    * @return Whether the splice was successful.
    */
   public synchronized boolean attemptSplice(long timeUs) {
-    if (largestDequeuedTimestampUs >= timeUs) {
+    if (length == 0) {
+      return timeUs > largestDiscardedTimestampUs;
+    }
+    long largestReadTimestampUs = Math.max(largestDiscardedTimestampUs,
+        getLargestTimestamp(readPosition));
+    if (largestReadTimestampUs >= timeUs) {
       return false;
     }
     int retainCount = length;
-    while (retainCount > 0
-        && timesUs[(relativeStartIndex + retainCount - 1) % capacity] >= timeUs) {
+    int relativeSampleIndex = getRelativeIndex(length - 1);
+    while (retainCount > readPosition && timesUs[relativeSampleIndex] >= timeUs) {
       retainCount--;
+      relativeSampleIndex--;
+      if (relativeSampleIndex == -1) {
+        relativeSampleIndex = capacity - 1;
+      }
     }
     discardUpstreamSamples(absoluteStartIndex + retainCount);
     return true;
+  }
+
+  // Internal methods.
+
+  /**
+   * Finds the sample in the specified range that's before or at the specified time. If
+   * {@code keyframe} is {@code true} then the sample is additionally required to be a keyframe.
+   *
+   * @param relativeStartIndex The relative index from which to start searching.
+   * @param length The length of the range being searched.
+   * @param timeUs The specified time.
+   * @param keyframe Whether only keyframes should be considered.
+   * @return The offset from {@code relativeStartIndex} to the found sample, or -1 if no matching
+   *     sample was found.
+   */
+  private int findSampleBefore(int relativeStartIndex, int length, long timeUs, boolean keyframe) {
+    // This could be optimized to use a binary search, however in practice callers to this method
+    // normally pass times near to the start of the search region. Hence it's unclear whether
+    // switching to a binary search would yield any real benefit.
+    int sampleCountToTarget = -1;
+    int searchIndex = relativeStartIndex;
+    for (int i = 0; i < length && timesUs[searchIndex] <= timeUs; i++) {
+      if (!keyframe || (flags[searchIndex] & C.BUFFER_FLAG_KEY_FRAME) != 0) {
+        // We've found a suitable sample.
+        sampleCountToTarget = i;
+      }
+      searchIndex++;
+      if (searchIndex == capacity) {
+        searchIndex = 0;
+      }
+    }
+    return sampleCountToTarget;
+  }
+
+  /**
+   * Discards the specified number of samples.
+   *
+   * @param discardCount The number of samples to discard.
+   * @return The corresponding offset up to which data should be discarded, or
+   *     {@link C#POSITION_UNSET} if no discarding of data is necessary.
+   */
+  private long discardSamples(int discardCount) {
+    largestDiscardedTimestampUs = Math.max(largestDiscardedTimestampUs,
+        getLargestTimestamp(discardCount));
+    length -= discardCount;
+    absoluteStartIndex += discardCount;
+    relativeStartIndex += discardCount;
+    if (relativeStartIndex >= capacity) {
+      relativeStartIndex -= capacity;
+    }
+    readPosition -= discardCount;
+    if (readPosition < 0) {
+      readPosition = 0;
+    }
+    if (length == 0) {
+      int relativeLastDiscardIndex = (relativeStartIndex == 0 ? capacity : relativeStartIndex) - 1;
+      return offsets[relativeLastDiscardIndex] + sizes[relativeLastDiscardIndex];
+    } else {
+      return offsets[relativeStartIndex];
+    }
+  }
+
+  /**
+   * Finds the largest timestamp of any sample from the start of the queue up to the specified
+   * length, assuming that the timestamps prior to a keyframe are always less than the timestamp of
+   * the keyframe itself, and of subsequent frames.
+   *
+   * @param length The length of the range being searched.
+   * @return The largest timestamp, or {@link Long#MIN_VALUE} if {@code length == 0}.
+   */
+  private long getLargestTimestamp(int length) {
+    if (length == 0) {
+      return Long.MIN_VALUE;
+    }
+    long largestTimestampUs = Long.MIN_VALUE;
+    int relativeSampleIndex = getRelativeIndex(length - 1);
+    for (int i = 0; i < length; i++) {
+      largestTimestampUs = Math.max(largestTimestampUs, timesUs[relativeSampleIndex]);
+      if ((flags[relativeSampleIndex] & C.BUFFER_FLAG_KEY_FRAME) != 0) {
+        break;
+      }
+      relativeSampleIndex--;
+      if (relativeSampleIndex == -1) {
+        relativeSampleIndex = capacity - 1;
+      }
+    }
+    return largestTimestampUs;
+  }
+
+   /**
+    * Returns the relative index for a given offset from the start of the queue.
+    *
+    * @param offset The offset, which must be in the range [0, length].
+    */
+  private int getRelativeIndex(int offset) {
+    int relativeIndex = relativeStartIndex + offset;
+    return relativeIndex < capacity ? relativeIndex : relativeIndex - capacity;
   }
 
 }

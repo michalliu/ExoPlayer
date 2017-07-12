@@ -20,6 +20,7 @@ import android.graphics.Canvas;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.support.annotation.IntDef;
 import android.view.Surface;
 import com.google.android.exoplayer2.BaseRenderer;
 import com.google.android.exoplayer2.C;
@@ -30,6 +31,7 @@ import com.google.android.exoplayer2.FormatHolder;
 import com.google.android.exoplayer2.decoder.DecoderCounters;
 import com.google.android.exoplayer2.decoder.DecoderInputBuffer;
 import com.google.android.exoplayer2.drm.DrmSession;
+import com.google.android.exoplayer2.drm.DrmSession.DrmSessionException;
 import com.google.android.exoplayer2.drm.DrmSessionManager;
 import com.google.android.exoplayer2.drm.ExoMediaCrypto;
 import com.google.android.exoplayer2.util.Assertions;
@@ -38,11 +40,34 @@ import com.google.android.exoplayer2.util.TraceUtil;
 import com.google.android.exoplayer2.util.Util;
 import com.google.android.exoplayer2.video.VideoRendererEventListener;
 import com.google.android.exoplayer2.video.VideoRendererEventListener.EventDispatcher;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
 
 /**
  * Decodes and renders video using the native VP9 decoder.
  */
 public final class LibvpxVideoRenderer extends BaseRenderer {
+
+  @Retention(RetentionPolicy.SOURCE)
+  @IntDef({REINITIALIZATION_STATE_NONE, REINITIALIZATION_STATE_SIGNAL_END_OF_STREAM,
+      REINITIALIZATION_STATE_WAIT_END_OF_STREAM})
+  private @interface ReinitializationState {}
+  /**
+   * The decoder does not need to be re-initialized.
+   */
+  private static final int REINITIALIZATION_STATE_NONE = 0;
+  /**
+   * The input format has changed in a way that requires the decoder to be re-initialized, but we
+   * haven't yet signaled an end of stream to the existing decoder. We need to do so in order to
+   * ensure that it outputs any remaining buffers before we release it.
+   */
+  private static final int REINITIALIZATION_STATE_SIGNAL_END_OF_STREAM = 1;
+  /**
+   * The input format has changed in a way that requires the decoder to be re-initialized, and we've
+   * signaled an end of stream to the existing decoder. We're waiting for the decoder to output an
+   * end of stream signal to indicate that it has output any remaining buffers before we release it.
+   */
+  private static final int REINITIALIZATION_STATE_WAIT_END_OF_STREAM = 2;
 
   /**
    * The type of a message that can be passed to an instance of this class via
@@ -76,6 +101,10 @@ public final class LibvpxVideoRenderer extends BaseRenderer {
   private VpxOutputBuffer nextOutputBuffer;
   private DrmSession<ExoMediaCrypto> drmSession;
   private DrmSession<ExoMediaCrypto> pendingDrmSession;
+
+  @ReinitializationState
+  private int decoderReinitializationState;
+  private boolean decoderReceivedBuffers;
 
   private Bitmap bitmap;
   private boolean renderedFirstFrame;
@@ -153,6 +182,7 @@ public final class LibvpxVideoRenderer extends BaseRenderer {
     flagsOnlyBuffer = DecoderInputBuffer.newFlagsOnlyInstance();
     eventDispatcher = new EventDispatcher(eventHandler, eventListener);
     outputMode = VpxDecoder.OUTPUT_MODE_NONE;
+    decoderReinitializationState = REINITIALIZATION_STATE_NONE;
   }
 
   @Override
@@ -185,49 +215,25 @@ public final class LibvpxVideoRenderer extends BaseRenderer {
       }
     }
 
-    // We have a format.
-    drmSession = pendingDrmSession;
-    ExoMediaCrypto mediaCrypto = null;
-    if (drmSession != null) {
-      int drmSessionState = drmSession.getState();
-      if (drmSessionState == DrmSession.STATE_ERROR) {
-        throw ExoPlaybackException.createForRenderer(drmSession.getError(), getIndex());
-      } else if (drmSessionState == DrmSession.STATE_OPENED
-          || drmSessionState == DrmSession.STATE_OPENED_WITH_KEYS) {
-        mediaCrypto = drmSession.getMediaCrypto();
-      } else {
-        // The drm session isn't open yet.
-        return;
-      }
-    }
-    try {
-      if (decoder == null) {
-        // If we don't have a decoder yet, we need to instantiate one.
-        long codecInitializingTimestamp = SystemClock.elapsedRealtime();
-        TraceUtil.beginSection("createVpxDecoder");
-        decoder = new VpxDecoder(NUM_BUFFERS, NUM_BUFFERS, INITIAL_INPUT_BUFFER_SIZE, mediaCrypto);
-        decoder.setOutputMode(outputMode);
+    // If we don't have a decoder yet, we need to instantiate one.
+    maybeInitDecoder();
+
+    if (decoder != null) {
+      try {
+        // Rendering loop.
+        TraceUtil.beginSection("drainAndFeed");
+        while (drainOutputBuffer(positionUs)) {}
+        while (feedInputBuffer()) {}
         TraceUtil.endSection();
-        long codecInitializedTimestamp = SystemClock.elapsedRealtime();
-        eventDispatcher.decoderInitialized(decoder.getName(), codecInitializedTimestamp,
-            codecInitializedTimestamp - codecInitializingTimestamp);
-        decoderCounters.decoderInitCount++;
+      } catch (VpxDecoderException e) {
+        throw ExoPlaybackException.createForRenderer(e, getIndex());
       }
-      TraceUtil.beginSection("drainAndFeed");
-      while (drainOutputBuffer(positionUs)) {}
-      while (feedInputBuffer()) {}
-      TraceUtil.endSection();
-    } catch (VpxDecoderException e) {
-      throw ExoPlaybackException.createForRenderer(e, getIndex());
+      decoderCounters.ensureUpdated();
     }
-    decoderCounters.ensureUpdated();
   }
 
-  private boolean drainOutputBuffer(long positionUs) throws VpxDecoderException {
-    if (outputStreamEnded) {
-      return false;
-    }
-
+  private boolean drainOutputBuffer(long positionUs) throws ExoPlaybackException,
+      VpxDecoderException {
     // Acquire outputBuffer either from nextOutputBuffer or from the decoder.
     if (outputBuffer == null) {
       if (nextOutputBuffer != null) {
@@ -247,9 +253,15 @@ public final class LibvpxVideoRenderer extends BaseRenderer {
     }
 
     if (outputBuffer.isEndOfStream()) {
-      outputStreamEnded = true;
-      outputBuffer.release();
-      outputBuffer = null;
+      if (decoderReinitializationState == REINITIALIZATION_STATE_WAIT_END_OF_STREAM) {
+        // We're waiting to re-initialize the decoder, and have now processed all final buffers.
+        releaseDecoder();
+        maybeInitDecoder();
+      } else {
+        outputBuffer.release();
+        outputBuffer = null;
+        outputStreamEnded = true;
+      }
       return false;
     }
 
@@ -353,7 +365,9 @@ public final class LibvpxVideoRenderer extends BaseRenderer {
   }
 
   private boolean feedInputBuffer() throws VpxDecoderException, ExoPlaybackException {
-    if (inputStreamEnded) {
+    if (decoder == null || decoderReinitializationState == REINITIALIZATION_STATE_WAIT_END_OF_STREAM
+        || inputStreamEnded) {
+      // We need to reinitialize the decoder or the input stream has ended.
       return false;
     }
 
@@ -362,6 +376,14 @@ public final class LibvpxVideoRenderer extends BaseRenderer {
       if (inputBuffer == null) {
         return false;
       }
+    }
+
+    if (decoderReinitializationState == REINITIALIZATION_STATE_SIGNAL_END_OF_STREAM) {
+      inputBuffer.setFlags(C.BUFFER_FLAG_END_OF_STREAM);
+      decoder.queueInputBuffer(inputBuffer);
+      inputBuffer = null;
+      decoderReinitializationState = REINITIALIZATION_STATE_WAIT_END_OF_STREAM;
+      return false;
     }
 
     int result;
@@ -393,35 +415,41 @@ public final class LibvpxVideoRenderer extends BaseRenderer {
     inputBuffer.flip();
     inputBuffer.colorInfo = formatHolder.format.colorInfo;
     decoder.queueInputBuffer(inputBuffer);
+    decoderReceivedBuffers = true;
     decoderCounters.inputBufferCount++;
     inputBuffer = null;
     return true;
   }
 
   private boolean shouldWaitForKeys(boolean bufferEncrypted) throws ExoPlaybackException {
-    if (drmSession == null) {
+    if (drmSession == null || (!bufferEncrypted && playClearSamplesWithoutKeys)) {
       return false;
     }
-    int drmSessionState = drmSession.getState();
+    @DrmSession.State int drmSessionState = drmSession.getState();
     if (drmSessionState == DrmSession.STATE_ERROR) {
       throw ExoPlaybackException.createForRenderer(drmSession.getError(), getIndex());
     }
-    return drmSessionState != DrmSession.STATE_OPENED_WITH_KEYS
-        && (bufferEncrypted || !playClearSamplesWithoutKeys);
+    return drmSessionState != DrmSession.STATE_OPENED_WITH_KEYS;
   }
 
-  private void flushDecoder() {
-    inputBuffer = null;
+  private void flushDecoder() throws ExoPlaybackException {
     waitingForKeys = false;
-    if (outputBuffer != null) {
-      outputBuffer.release();
-      outputBuffer = null;
+    if (decoderReinitializationState != REINITIALIZATION_STATE_NONE) {
+      releaseDecoder();
+      maybeInitDecoder();
+    } else {
+      inputBuffer = null;
+      if (outputBuffer != null) {
+        outputBuffer.release();
+        outputBuffer = null;
+      }
+      if (nextOutputBuffer != null) {
+        nextOutputBuffer.release();
+        nextOutputBuffer = null;
+      }
+      decoder.flush();
+      decoderReceivedBuffers = false;
     }
-    if (nextOutputBuffer != null) {
-      nextOutputBuffer.release();
-      nextOutputBuffer = null;
-    }
-    decoder.flush();
   }
 
   @Override
@@ -459,7 +487,7 @@ public final class LibvpxVideoRenderer extends BaseRenderer {
   }
 
   @Override
-  protected void onPositionReset(long positionUs, boolean joining) {
+  protected void onPositionReset(long positionUs, boolean joining) throws ExoPlaybackException {
     inputStreamEnded = false;
     outputStreamEnded = false;
     clearRenderedFirstFrame();
@@ -478,18 +506,16 @@ public final class LibvpxVideoRenderer extends BaseRenderer {
   protected void onStarted() {
     droppedFrames = 0;
     droppedFrameAccumulationStartTimeMs = SystemClock.elapsedRealtime();
-    joiningDeadlineMs = C.TIME_UNSET;
   }
 
   @Override
   protected void onStopped() {
+    joiningDeadlineMs = C.TIME_UNSET;
     maybeNotifyDroppedFrames();
   }
 
   @Override
   protected void onDisabled() {
-    inputBuffer = null;
-    outputBuffer = null;
     format = null;
     waitingForKeys = false;
     clearReportedVideoSize();
@@ -516,20 +542,53 @@ public final class LibvpxVideoRenderer extends BaseRenderer {
     }
   }
 
-  private void releaseDecoder() {
+  private void maybeInitDecoder() throws ExoPlaybackException {
     if (decoder != null) {
-      decoder.release();
-      decoder = null;
-      decoderCounters.decoderReleaseCount++;
-      waitingForKeys = false;
-      if (drmSession != null && pendingDrmSession != drmSession) {
-        try {
-          drmSessionManager.releaseSession(drmSession);
-        } finally {
-          drmSession = null;
+      return;
+    }
+
+    drmSession = pendingDrmSession;
+    ExoMediaCrypto mediaCrypto = null;
+    if (drmSession != null) {
+      mediaCrypto = drmSession.getMediaCrypto();
+      if (mediaCrypto == null) {
+        DrmSessionException drmError = drmSession.getError();
+        if (drmError != null) {
+          throw ExoPlaybackException.createForRenderer(drmError, getIndex());
         }
+        // The drm session isn't open yet.
+        return;
       }
     }
+
+    try {
+      long codecInitializingTimestamp = SystemClock.elapsedRealtime();
+      TraceUtil.beginSection("createVpxDecoder");
+      decoder = new VpxDecoder(NUM_BUFFERS, NUM_BUFFERS, INITIAL_INPUT_BUFFER_SIZE, mediaCrypto);
+      decoder.setOutputMode(outputMode);
+      TraceUtil.endSection();
+      long codecInitializedTimestamp = SystemClock.elapsedRealtime();
+      eventDispatcher.decoderInitialized(decoder.getName(), codecInitializedTimestamp,
+          codecInitializedTimestamp - codecInitializingTimestamp);
+      decoderCounters.decoderInitCount++;
+    } catch (VpxDecoderException e) {
+      throw ExoPlaybackException.createForRenderer(e, getIndex());
+    }
+  }
+
+  private void releaseDecoder() {
+    if (decoder == null) {
+      return;
+    }
+
+    inputBuffer = null;
+    outputBuffer = null;
+    nextOutputBuffer = null;
+    decoder.release();
+    decoder = null;
+    decoderCounters.decoderReleaseCount++;
+    decoderReinitializationState = REINITIALIZATION_STATE_NONE;
+    decoderReceivedBuffers = false;
   }
 
   private void onInputFormatChanged(Format newFormat) throws ExoPlaybackException {
@@ -550,6 +609,17 @@ public final class LibvpxVideoRenderer extends BaseRenderer {
         }
       } else {
         pendingDrmSession = null;
+      }
+    }
+
+    if (pendingDrmSession != drmSession) {
+      if (decoderReceivedBuffers) {
+        // Signal end of stream and wait for any final output buffers before re-initialization.
+        decoderReinitializationState = REINITIALIZATION_STATE_SIGNAL_END_OF_STREAM;
+      } else {
+        // There aren't any final output buffers, so release the decoder immediately.
+        releaseDecoder();
+        maybeInitDecoder();
       }
     }
 
