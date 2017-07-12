@@ -20,6 +20,7 @@ import android.content.Context;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Message;
+import android.util.Log;
 import android.view.Choreographer;
 import android.view.Choreographer.FrameCallback;
 import android.view.WindowManager;
@@ -88,7 +89,7 @@ public final class VideoFrameReleaseTimeHelper {
    */
   public void enable() {
     haveSync = false;
-    if (useDefaultDisplayVsync) {
+    if (useDefaultDisplayVsync && vsyncSampler.available()) {
       vsyncSampler.addObserver();
     }
   }
@@ -97,7 +98,7 @@ public final class VideoFrameReleaseTimeHelper {
    * Disables the helper.
    */
   public void disable() {
-    if (useDefaultDisplayVsync) {
+    if (useDefaultDisplayVsync && vsyncSampler.available()) {
       vsyncSampler.removeObserver();
     }
   }
@@ -162,7 +163,7 @@ public final class VideoFrameReleaseTimeHelper {
     lastFramePresentationTimeUs = framePresentationTimeUs;
     pendingAdjustedFrameTimeNs = adjustedFrameTimeNs;
 
-    if (vsyncSampler == null || vsyncSampler.sampledVsyncTimeNs == 0) {
+    if (vsyncSampler == null || !vsyncSampler.available() || vsyncSampler.sampledVsyncTimeNs == 0) {
       return adjustedReleaseTimeNs;
     }
 
@@ -211,6 +212,7 @@ public final class VideoFrameReleaseTimeHelper {
    * leak in the platform on API levels prior to 23. See [Internal: b/12455729].
    */
   private static final class VSyncSampler implements FrameCallback, Handler.Callback {
+    public static final String TAG = "VSyncSampler";
 
     public volatile long sampledVsyncTimeNs;
 
@@ -255,7 +257,13 @@ public final class VideoFrameReleaseTimeHelper {
     @Override
     public void doFrame(long vsyncTimeNs) {
       sampledVsyncTimeNs = vsyncTimeNs;
-      choreographer.postFrameCallbackDelayed(this, CHOREOGRAPHER_SAMPLE_DELAY_MILLIS);
+      if (choreographer != null) {
+        choreographer.postFrameCallbackDelayed(this, CHOREOGRAPHER_SAMPLE_DELAY_MILLIS);
+      }
+    }
+
+    public boolean available() {
+      return choreographer != null;
     }
 
     @Override
@@ -280,19 +288,23 @@ public final class VideoFrameReleaseTimeHelper {
     }
 
     private void createChoreographerInstanceInternal() {
-      choreographer = Choreographer.getInstance();
+      try {
+        choreographer = Choreographer.getInstance();
+      } catch (NullPointerException ex) {
+        Log.e(TAG, "Choreographer instance created failed " + ex.getMessage());
+      }
     }
 
     private void addObserverInternal() {
       observerCount++;
-      if (observerCount == 1) {
+      if (observerCount == 1 && choreographer != null) {
         choreographer.postFrameCallback(this);
       }
     }
 
     private void removeObserverInternal() {
       observerCount--;
-      if (observerCount == 0) {
+      if (observerCount == 0 && choreographer != null) {
         choreographer.removeFrameCallback(this);
         sampledVsyncTimeNs = 0;
       }
