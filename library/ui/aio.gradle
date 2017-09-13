@@ -1,0 +1,13 @@
+apply plugin: 'com.android.library'
+
+android {
+}
+
+hello { task ->
+    println "$task.project.name " +  "-> okay!"
+}
+
+dependencies {
+    compile project(':exoplayer2-library-core')
+    compile 'com.android.support:support-annotations:' + supportLibraryVersion
+}
