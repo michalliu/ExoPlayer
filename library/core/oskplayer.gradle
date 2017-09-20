@@ -1,0 +1,12 @@
+apply plugin: 'com.android.library'
+
+android {
+}
+
+hello { task ->
+    println "$task.project.name " +  "-> okay!"
+}
+
+dependencies {
+    compile 'com.android.support:support-annotations:' + supportLibraryVersion
+}
