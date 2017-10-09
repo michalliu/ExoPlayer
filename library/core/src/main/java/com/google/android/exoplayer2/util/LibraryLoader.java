@@ -15,6 +15,8 @@
  */
 package com.google.android.exoplayer2.util;
 
+import android.util.Log;
+
 /**
  * Configurable loader for native libraries.
  */
@@ -54,7 +56,7 @@ public final class LibraryLoader {
       }
       isAvailable = true;
     } catch (UnsatisfiedLinkError exception) {
-      // Do nothing.
+        Log.w(LibraryLoader.class.getSimpleName(), "loadLibrary failed with exception " + exception.toString());
     }
     return isAvailable;
   }

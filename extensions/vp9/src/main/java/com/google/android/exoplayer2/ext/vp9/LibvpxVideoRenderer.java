@@ -21,6 +21,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.support.annotation.IntDef;
+import android.util.Log;
 import android.view.Surface;
 import com.google.android.exoplayer2.BaseRenderer;
 import com.google.android.exoplayer2.C;
@@ -47,6 +48,7 @@ import java.lang.annotation.RetentionPolicy;
  * Decodes and renders video using the native VP9 decoder.
  */
 public final class LibvpxVideoRenderer extends BaseRenderer {
+  public static final String TAG = "LibvpxVideoRenderer";
 
   @Retention(RetentionPolicy.SOURCE)
   @IntDef({REINITIALIZATION_STATE_NONE, REINITIALIZATION_STATE_SIGNAL_END_OF_STREAM,
@@ -129,6 +131,7 @@ public final class LibvpxVideoRenderer extends BaseRenderer {
   private long droppedFrameAccumulationStartTimeMs;
   private int droppedFrames;
   private int consecutiveDroppedFrameCount;
+  private String vpxDecoderInfo;
 
   /**
    * @param scaleToFit Whether video frames should be scaled to fit when rendering.
@@ -194,6 +197,17 @@ public final class LibvpxVideoRenderer extends BaseRenderer {
 
   @Override
   public int supportsFormat(Format format) {
+    Log.d(TAG, "supportsFormat " + format.sampleMimeType);
+    if (!VpxLibrary.isAvailable()) {
+      Log.w(TAG, "VpxLibrary not available");
+    } else {
+      if (vpxDecoderInfo == null) {
+        vpxDecoderInfo = "VpxLibrary Version:" + VpxLibrary.getVersion()
+                + ", build params:" + VpxLibrary.getBuildConfig()
+                + ", HighBitDepthSupported:" + VpxLibrary.isHighBitDepthSupported();
+        Log.i(TAG, vpxDecoderInfo);
+      }
+    }
     return VpxLibrary.isAvailable() && MimeTypes.VIDEO_VP9.equalsIgnoreCase(format.sampleMimeType)
         ? (FORMAT_HANDLED | ADAPTIVE_SEAMLESS) : FORMAT_UNSUPPORTED_TYPE;
   }
