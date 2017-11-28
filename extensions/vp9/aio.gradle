@@ -1,10 +1,6 @@
 apply plugin: 'com.android.library'
 
 android {
-    defaultConfig {
-        minSdkVersion project.ext.minSdkVersion
-        targetSdkVersion project.ext.targetSdkVersion
-    }
 
 	sourceSets.main {
         jniLibs.srcDir 'src/main/libs'
