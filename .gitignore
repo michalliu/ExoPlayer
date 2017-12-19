@@ -43,9 +43,9 @@ dist
 tmp
 
 # VP9 extension
-extensions/vp9/src/main/jni/libvpx
-extensions/vp9/src/main/jni/libvpx_android_configs
-extensions/vp9/src/main/jni/libyuv
+#extensions/vp9/src/main/jni/libvpx
+#extensions/vp9/src/main/jni/libvpx_android_configs
+#extensions/vp9/src/main/jni/libyuv
 
 # Opus extension
 extensions/opus/src/main/jni/libopus
