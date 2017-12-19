@@ -1,0 +1,9 @@
+[submodule "extensions/vp9/src/main/jni/libvpx"]
+	path = extensions/vp9/src/main/jni/libvpx
+	url = https://github.com/michalliu/exoplayer2_libvpx.git
+[submodule "extensions/vp9/src/main/jni/libyuv"]
+	path = extensions/vp9/src/main/jni/libyuv
+	url = https://github.com/michalliu/exoplayer2_libyuv.git
+[submodule "extensions/vp9/src/main/jni/libvpx_android_configs"]
+	path = extensions/vp9/src/main/jni/libvpx_android_configs
+	url = https://github.com/michalliu/exoplayer2_libvpx_andorid_configs
