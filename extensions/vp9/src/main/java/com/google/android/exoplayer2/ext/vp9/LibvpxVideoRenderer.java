@@ -21,6 +21,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.support.annotation.IntDef;
+import android.util.Log;
 import android.view.Surface;
 import com.google.android.exoplayer2.BaseRenderer;
 import com.google.android.exoplayer2.C;
@@ -47,6 +48,7 @@ import java.lang.annotation.RetentionPolicy;
  * Decodes and renders video using the native VP9 decoder.
  */
 public final class LibvpxVideoRenderer extends BaseRenderer {
+  public static final String TAG = "LibvpxVideoRenderer";
 
   @Retention(RetentionPolicy.SOURCE)
   @IntDef({REINITIALIZATION_STATE_NONE, REINITIALIZATION_STATE_SIGNAL_END_OF_STREAM,
@@ -131,6 +133,8 @@ public final class LibvpxVideoRenderer extends BaseRenderer {
   private int consecutiveDroppedFrameCount;
   private int buffersInCodecCount;
 
+  private String vpxDecoderInfo;
+
   /**
    * @param scaleToFit Whether video frames should be scaled to fit when rendering.
    * @param allowedJoiningTimeMs The maximum duration in milliseconds for which this video renderer
@@ -193,8 +197,23 @@ public final class LibvpxVideoRenderer extends BaseRenderer {
     decoderReinitializationState = REINITIALIZATION_STATE_NONE;
   }
 
+  private void checkSupportsFormat(Format format) {
+      Log.d(TAG, "supportsFormat " + format.sampleMimeType);
+      if (!VpxLibrary.isAvailable()) {
+          Log.w(TAG, "VpxLibrary not available");
+        } else {
+          if (vpxDecoderInfo == null) {
+              vpxDecoderInfo = "VpxLibrary Version:" + VpxLibrary.getVersion()
+                              + ", build params:" + VpxLibrary.getBuildConfig()
+                              + ", HighBitDepthSupported:" + VpxLibrary.isHighBitDepthSupported();
+              Log.i(TAG, vpxDecoderInfo);
+            }
+       }
+  }
+
   @Override
   public int supportsFormat(Format format) {
+    checkSupportsFormat(format);
     if (!VpxLibrary.isAvailable() || !MimeTypes.VIDEO_VP9.equalsIgnoreCase(format.sampleMimeType)) {
       return FORMAT_UNSUPPORTED_TYPE;
     } else if (!supportsFormatDrm(drmSessionManager, format.drmInitData)) {
