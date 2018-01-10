@@ -160,7 +160,7 @@ public final class HostActivity extends Activity implements SurfaceHolder.Callba
     super.onCreate(savedInstanceState);
     requestWindowFeature(Window.FEATURE_NO_TITLE);
     setContentView(getResources().getIdentifier("host_activity", "layout", getPackageName()));
-    surfaceView = findViewById(
+    surfaceView = (SurfaceView) findViewById(
         getResources().getIdentifier("surface_view", "id", getPackageName()));
     surfaceView.getHolder().addCallback(this);
   }
