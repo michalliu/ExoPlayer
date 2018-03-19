@@ -19,19 +19,19 @@ import static com.google.common.truth.Truth.assertThat;
 
 import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.extractor.MpegAudioHeader;
+import com.google.android.exoplayer2.extractor.SeekMap.SeekPoints;
+import com.google.android.exoplayer2.extractor.SeekPoint;
 import com.google.android.exoplayer2.util.ParsableByteArray;
 import com.google.android.exoplayer2.util.Util;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
-import org.robolectric.annotation.Config;
 
 /**
  * Tests for {@link XingSeeker}.
  */
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk = Config.TARGET_SDK, manifest = Config.NONE)
 public final class XingSeekerTest {
 
   // Xing header/payload from http://storage.googleapis.com/exoplayer-test-media-0/play.mp3.
@@ -43,17 +43,17 @@ public final class XingSeekerTest {
   private static final int XING_FRAME_POSITION = 157;
 
   /**
-   * Size of the audio stream, encoded in {@link #XING_FRAME_PAYLOAD}.
+   * Data size, as encoded in {@link #XING_FRAME_PAYLOAD}.
    */
-  private static final int STREAM_SIZE_BYTES = 948505;
+  private static final int DATA_SIZE_BYTES = 948505;
   /**
    * Duration of the audio stream in microseconds, encoded in {@link #XING_FRAME_PAYLOAD}.
    */
   private static final int STREAM_DURATION_US = 59271836;
   /**
-   * The length of the file in bytes.
+   * The length of the stream in bytes.
    */
-  private static final int INPUT_LENGTH = 948662;
+  private static final int STREAM_LENGTH = XING_FRAME_POSITION + DATA_SIZE_BYTES;
 
   private XingSeeker seeker;
   private XingSeeker seekerWithInputLength;
@@ -63,10 +63,10 @@ public final class XingSeekerTest {
   public void setUp() throws Exception {
     MpegAudioHeader xingFrameHeader = new MpegAudioHeader();
     MpegAudioHeader.populateHeader(XING_FRAME_HEADER_DATA, xingFrameHeader);
-    seeker = XingSeeker.create(xingFrameHeader, new ParsableByteArray(XING_FRAME_PAYLOAD),
-        XING_FRAME_POSITION, C.LENGTH_UNSET);
-    seekerWithInputLength = XingSeeker.create(xingFrameHeader,
-        new ParsableByteArray(XING_FRAME_PAYLOAD), XING_FRAME_POSITION, INPUT_LENGTH);
+    seeker = XingSeeker.create(C.LENGTH_UNSET, XING_FRAME_POSITION, xingFrameHeader,
+        new ParsableByteArray(XING_FRAME_PAYLOAD));
+    seekerWithInputLength = XingSeeker.create(STREAM_LENGTH,
+        XING_FRAME_POSITION, xingFrameHeader, new ParsableByteArray(XING_FRAME_PAYLOAD));
     xingFrameSize = xingFrameHeader.frameSize;
   }
 
@@ -84,35 +84,47 @@ public final class XingSeekerTest {
 
   @Test
   public void testGetTimeUsAtEndOfStream() {
-    assertThat(seeker.getTimeUs(XING_FRAME_POSITION + xingFrameSize + STREAM_SIZE_BYTES))
+    assertThat(seeker.getTimeUs(STREAM_LENGTH))
         .isEqualTo(STREAM_DURATION_US);
     assertThat(
-        seekerWithInputLength.getTimeUs(XING_FRAME_POSITION + xingFrameSize + STREAM_SIZE_BYTES))
+        seekerWithInputLength.getTimeUs(STREAM_LENGTH))
         .isEqualTo(STREAM_DURATION_US);
   }
 
   @Test
-  public void testGetPositionAtStartOfStream() {
-    assertThat(seeker.getPosition(0)).isEqualTo(XING_FRAME_POSITION + xingFrameSize);
-    assertThat(seekerWithInputLength.getPosition(0)).isEqualTo(XING_FRAME_POSITION + xingFrameSize);
+  public void testGetSeekPointsAtStartOfStream() {
+    SeekPoints seekPoints = seeker.getSeekPoints(0);
+    SeekPoint seekPoint = seekPoints.first;
+    assertThat(seekPoint).isEqualTo(seekPoints.second);
+    assertThat(seekPoint.timeUs).isEqualTo(0);
+    assertThat(seekPoint.position).isEqualTo(XING_FRAME_POSITION + xingFrameSize);
   }
 
   @Test
-  public void testGetPositionAtEndOfStream() {
-    assertThat(seeker.getPosition(STREAM_DURATION_US))
-        .isEqualTo(XING_FRAME_POSITION + STREAM_SIZE_BYTES - 1);
-    assertThat(seekerWithInputLength.getPosition(STREAM_DURATION_US))
-        .isEqualTo(XING_FRAME_POSITION + STREAM_SIZE_BYTES - 1);
+  public void testGetSeekPointsAtEndOfStream() {
+    SeekPoints seekPoints = seeker.getSeekPoints(STREAM_DURATION_US);
+    SeekPoint seekPoint = seekPoints.first;
+    assertThat(seekPoint).isEqualTo(seekPoints.second);
+    assertThat(seekPoint.timeUs).isEqualTo(STREAM_DURATION_US);
+    assertThat(seekPoint.position).isEqualTo(STREAM_LENGTH - 1);
   }
 
   @Test
   public void testGetTimeForAllPositions() {
-    for (int offset = xingFrameSize; offset < STREAM_SIZE_BYTES; offset++) {
+    for (int offset = xingFrameSize; offset < DATA_SIZE_BYTES; offset++) {
       int position = XING_FRAME_POSITION + offset;
+      // Test seeker.
       long timeUs = seeker.getTimeUs(position);
-      assertThat(seeker.getPosition(timeUs)).isEqualTo(position);
+      SeekPoints seekPoints = seeker.getSeekPoints(timeUs);
+      SeekPoint seekPoint = seekPoints.first;
+      assertThat(seekPoint).isEqualTo(seekPoints.second);
+      assertThat(seekPoint.position).isEqualTo(position);
+      // Test seekerWithInputLength.
       timeUs = seekerWithInputLength.getTimeUs(position);
-      assertThat(seekerWithInputLength.getPosition(timeUs)).isEqualTo(position);
+      seekPoints = seekerWithInputLength.getSeekPoints(timeUs);
+      seekPoint = seekPoints.first;
+      assertThat(seekPoint).isEqualTo(seekPoints.second);
+      assertThat(seekPoint.position).isEqualTo(position);
     }
   }
 

@@ -35,7 +35,8 @@ import java.io.IOException;
  *   player to load and read the media.</li>
  * </ul>
  * All methods are called on the player's internal playback thread, as described in the
- * {@link ExoPlayer} Javadoc.
+ * {@link ExoPlayer} Javadoc. They should not be called directly from application code. Instances
+ * should not be re-used, meaning they should be passed to {@link ExoPlayer#prepare} at most once.
  */
 public interface MediaSource {
 
@@ -63,12 +64,6 @@ public interface MediaSource {
   final class MediaPeriodId {
 
     /**
-     * Value for unset media period identifiers.
-     */
-    public static final MediaPeriodId UNSET =
-        new MediaPeriodId(C.INDEX_UNSET, C.INDEX_UNSET, C.INDEX_UNSET);
-
-    /**
      * The timeline period index.
      */
     public final int periodIndex;
@@ -86,12 +81,31 @@ public interface MediaSource {
     public final int adIndexInAdGroup;
 
     /**
+     * The sequence number of the window in the buffered sequence of windows this media period is
+     * part of. {@link C#INDEX_UNSET} if the media period id is not part of a buffered sequence of
+     * windows.
+     */
+    public final long windowSequenceNumber;
+
+    /**
+     * Creates a media period identifier for a dummy period which is not part of a buffered sequence
+     * of windows.
+     *
+     * @param periodIndex The period index.
+     */
+    public MediaPeriodId(int periodIndex) {
+      this(periodIndex, C.INDEX_UNSET);
+    }
+
+    /**
      * Creates a media period identifier for the specified period in the timeline.
      *
      * @param periodIndex The timeline period index.
+     * @param windowSequenceNumber The sequence number of the window in the buffered sequence of
+     *     windows this media period is part of.
      */
-    public MediaPeriodId(int periodIndex) {
-      this(periodIndex, C.INDEX_UNSET, C.INDEX_UNSET);
+    public MediaPeriodId(int periodIndex, long windowSequenceNumber) {
+      this(periodIndex, C.INDEX_UNSET, C.INDEX_UNSET, windowSequenceNumber);
     }
 
     /**
@@ -101,19 +115,24 @@ public interface MediaSource {
      * @param periodIndex The index of the timeline period that contains the ad group.
      * @param adGroupIndex The index of the ad group.
      * @param adIndexInAdGroup The index of the ad in the ad group.
+     * @param windowSequenceNumber The sequence number of the window in the buffered sequence of
+     *     windows this media period is part of.
      */
-    public MediaPeriodId(int periodIndex, int adGroupIndex, int adIndexInAdGroup) {
+    public MediaPeriodId(
+        int periodIndex, int adGroupIndex, int adIndexInAdGroup, long windowSequenceNumber) {
       this.periodIndex = periodIndex;
       this.adGroupIndex = adGroupIndex;
       this.adIndexInAdGroup = adIndexInAdGroup;
+      this.windowSequenceNumber = windowSequenceNumber;
     }
 
     /**
      * Returns a copy of this period identifier but with {@code newPeriodIndex} as its period index.
      */
     public MediaPeriodId copyWithPeriodIndex(int newPeriodIndex) {
-      return periodIndex == newPeriodIndex ? this
-          : new MediaPeriodId(newPeriodIndex, adGroupIndex, adIndexInAdGroup);
+      return periodIndex == newPeriodIndex
+          ? this
+          : new MediaPeriodId(newPeriodIndex, adGroupIndex, adIndexInAdGroup, windowSequenceNumber);
     }
 
     /**
@@ -133,8 +152,10 @@ public interface MediaSource {
       }
 
       MediaPeriodId periodId = (MediaPeriodId) obj;
-      return periodIndex == periodId.periodIndex && adGroupIndex == periodId.adGroupIndex
-          && adIndexInAdGroup == periodId.adIndexInAdGroup;
+      return periodIndex == periodId.periodIndex
+          && adGroupIndex == periodId.adGroupIndex
+          && adIndexInAdGroup == periodId.adIndexInAdGroup
+          && windowSequenceNumber == periodId.windowSequenceNumber;
     }
 
     @Override
@@ -143,13 +164,18 @@ public interface MediaSource {
       result = 31 * result + periodIndex;
       result = 31 * result + adGroupIndex;
       result = 31 * result + adIndexInAdGroup;
+      result = 31 * result + (int) windowSequenceNumber;
       return result;
     }
 
   }
 
+  String MEDIA_SOURCE_REUSED_ERROR_MESSAGE = "MediaSource instances are not allowed to be reused.";
+
   /**
    * Starts preparation of the source.
+   * <p>
+   * Should not be called directly from application code.
    *
    * @param player The player for which this source is being prepared.
    * @param isTopLevelSource Whether this source has been passed directly to
@@ -162,6 +188,8 @@ public interface MediaSource {
 
   /**
    * Throws any pending error encountered while loading or refreshing source information.
+   * <p>
+   * Should not be called directly from application code.
    */
   void maybeThrowSourceInfoRefreshError() throws IOException;
 
@@ -169,6 +197,8 @@ public interface MediaSource {
    * Returns a new {@link MediaPeriod} identified by {@code periodId}. This method may be called
    * multiple times with the same period identifier without an intervening call to
    * {@link #releasePeriod(MediaPeriod)}.
+   * <p>
+   * Should not be called directly from application code.
    *
    * @param id The identifier of the period.
    * @param allocator An {@link Allocator} from which to obtain media buffer allocations.
@@ -178,6 +208,8 @@ public interface MediaSource {
 
   /**
    * Releases the period.
+   * <p>
+   * Should not be called directly from application code.
    *
    * @param mediaPeriod The period to release.
    */
@@ -186,8 +218,7 @@ public interface MediaSource {
   /**
    * Releases the source.
    * <p>
-   * This method should be called when the source is no longer required. It may be called in any
-   * state.
+   * Should not be called directly from application code.
    */
   void releaseSource();
 

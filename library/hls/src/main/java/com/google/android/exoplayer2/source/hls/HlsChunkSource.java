@@ -253,7 +253,7 @@ import java.util.List;
     updateLiveEdgeTimeUs(mediaPlaylist);
 
     // Select the chunk.
-    int chunkMediaSequence;
+    long chunkMediaSequence;
     if (previous == null || switchingVariant) {
       long targetPositionUs = (previous == null || independentSegments) ? loadPositionUs
           : previous.startTimeUs;
@@ -261,9 +261,13 @@ import java.util.List;
         // If the playlist is too old to contain the chunk, we need to refresh it.
         chunkMediaSequence = mediaPlaylist.mediaSequence + mediaPlaylist.segments.size();
       } else {
-        chunkMediaSequence = Util.binarySearchFloor(mediaPlaylist.segments,
-            targetPositionUs - mediaPlaylist.startTimeUs, true,
-            !playlistTracker.isLive() || previous == null) + mediaPlaylist.mediaSequence;
+        chunkMediaSequence =
+            Util.binarySearchFloor(
+                    mediaPlaylist.segments,
+                    targetPositionUs,
+                    /* inclusive= */ true,
+                    /* stayInBounds= */ !playlistTracker.isLive() || previous == null)
+                + mediaPlaylist.mediaSequence;
         if (chunkMediaSequence < mediaPlaylist.mediaSequence && previous != null) {
           // We try getting the next chunk without adapting in case that's the reason for falling
           // behind the live window.
@@ -281,7 +285,7 @@ import java.util.List;
       return;
     }
 
-    int chunkIndex = chunkMediaSequence - mediaPlaylist.mediaSequence;
+    int chunkIndex = (int) (chunkMediaSequence - mediaPlaylist.mediaSequence);
     if (chunkIndex >= mediaPlaylist.segments.size()) {
       if (mediaPlaylist.hasEndTag) {
         out.endOfStream = true;
@@ -320,7 +324,9 @@ import java.util.List;
     }
 
     // Compute start time of the next chunk.
-    long startTimeUs = mediaPlaylist.startTimeUs + segment.relativeStartTimeUs;
+    long offsetFromInitialStartTimeUs =
+        mediaPlaylist.startTimeUs - playlistTracker.getInitialStartTimeUs();
+    long startTimeUs = offsetFromInitialStartTimeUs + segment.relativeStartTimeUs;
     int discontinuitySequence = mediaPlaylist.discontinuitySequence
         + segment.relativeDiscontinuitySequence;
     TimestampAdjuster timestampAdjuster = timestampAdjusterProvider.getAdjuster(
@@ -330,11 +336,27 @@ import java.util.List;
     Uri chunkUri = UriUtil.resolveToUri(mediaPlaylist.baseUri, segment.url);
     DataSpec dataSpec = new DataSpec(chunkUri, segment.byterangeOffset, segment.byterangeLength,
         null);
-    out.chunk = new HlsMediaChunk(extractorFactory, mediaDataSource, dataSpec, initDataSpec,
-        selectedUrl, muxedCaptionFormats, trackSelection.getSelectionReason(),
-        trackSelection.getSelectionData(), startTimeUs, startTimeUs + segment.durationUs,
-        chunkMediaSequence, discontinuitySequence, isTimestampMaster, timestampAdjuster, previous,
-        mediaPlaylist.drmInitData, encryptionKey, encryptionIv);
+    out.chunk =
+        new HlsMediaChunk(
+            extractorFactory,
+            mediaDataSource,
+            dataSpec,
+            initDataSpec,
+            selectedUrl,
+            muxedCaptionFormats,
+            trackSelection.getSelectionReason(),
+            trackSelection.getSelectionData(),
+            startTimeUs,
+            startTimeUs + segment.durationUs,
+            chunkMediaSequence,
+            discontinuitySequence,
+            segment.hasGapTag,
+            isTimestampMaster,
+            timestampAdjuster,
+            previous,
+            mediaPlaylist.drmInitData,
+            encryptionKey,
+            encryptionIv);
   }
 
   /**

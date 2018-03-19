@@ -15,6 +15,8 @@
  */
 package com.google.android.exoplayer2.ext.vp9;
 
+import static com.google.common.truth.Truth.assertThat;
+
 import android.content.Context;
 import android.net.Uri;
 import android.os.Looper;
@@ -27,6 +29,7 @@ import com.google.android.exoplayer2.Player;
 import com.google.android.exoplayer2.Renderer;
 import com.google.android.exoplayer2.extractor.mkv.MatroskaExtractor;
 import com.google.android.exoplayer2.source.ExtractorMediaSource;
+import com.google.android.exoplayer2.source.MediaSource;
 import com.google.android.exoplayer2.trackselection.DefaultTrackSelector;
 import com.google.android.exoplayer2.upstream.DefaultDataSourceFactory;
 
@@ -41,6 +44,14 @@ public class VpxPlaybackTest extends InstrumentationTestCase {
   private static final String INVALID_BITSTREAM_URI = "asset:///invalid-bitstream.webm";
 
   private static final String TAG = "VpxPlaybackTest";
+
+  @Override
+  protected void setUp() throws Exception {
+    super.setUp();
+    if (!VpxLibrary.isAvailable()) {
+      fail("Vpx library not available.");
+    }
+  }
 
   public void testBasicPlayback() throws ExoPlaybackException {
     playUri(BEAR_URI);
@@ -64,8 +75,8 @@ public class VpxPlaybackTest extends InstrumentationTestCase {
       playUri(INVALID_BITSTREAM_URI);
       fail();
     } catch (Exception e) {
-      assertNotNull(e.getCause());
-      assertTrue(e.getCause() instanceof VpxDecoderException);
+      assertThat(e.getCause()).isNotNull();
+      assertThat(e.getCause()).isInstanceOf(VpxDecoderException.class);
     }
   }
 
@@ -105,15 +116,16 @@ public class VpxPlaybackTest extends InstrumentationTestCase {
       DefaultTrackSelector trackSelector = new DefaultTrackSelector();
       player = ExoPlayerFactory.newInstance(new Renderer[] {videoRenderer}, trackSelector);
       player.addListener(this);
-      ExtractorMediaSource mediaSource = new ExtractorMediaSource(
-          uri,
-          new DefaultDataSourceFactory(context, "ExoPlayerExtVp9Test"),
-          MatroskaExtractor.FACTORY,
-          null,
-          null);
-      player.sendMessages(new ExoPlayer.ExoPlayerMessage(videoRenderer,
-          LibvpxVideoRenderer.MSG_SET_OUTPUT_BUFFER_RENDERER,
-          new VpxVideoSurfaceView(context)));
+      MediaSource mediaSource =
+          new ExtractorMediaSource.Factory(
+                  new DefaultDataSourceFactory(context, "ExoPlayerExtVp9Test"))
+              .setExtractorsFactory(MatroskaExtractor.FACTORY)
+              .createMediaSource(uri);
+      player
+          .createMessage(videoRenderer)
+          .setType(LibvpxVideoRenderer.MSG_SET_OUTPUT_BUFFER_RENDERER)
+          .setPayload(new VpxVideoSurfaceView(context))
+          .send();
       player.prepare(mediaSource);
       player.setPlayWhenReady(true);
       Looper.loop();
@@ -132,7 +144,6 @@ public class VpxPlaybackTest extends InstrumentationTestCase {
         Looper.myLooper().quit();
       }
     }
-
   }
 
 }

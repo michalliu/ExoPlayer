@@ -23,7 +23,7 @@ import java.util.Locale;
 /**
  * Utility methods for demo application.
  */
-/*package*/ final class DemoUtil {
+/* package */ final class DemoUtil {
 
   /**
    * Builds a track name for display.
