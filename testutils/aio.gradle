@@ -9,5 +9,6 @@ hello { task ->
 
 dependencies {
     compile project(":exoplayer2-library-core")
+    compile 'com.google.truth:truth:' + truthVersion
     compile 'org.mockito:mockito-core:' + mockitoVersion
 }
