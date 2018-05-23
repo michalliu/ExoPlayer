@@ -1,0 +1,35 @@
+apply plugin: 'com.android.library'
+
+android {
+    lintOptions {
+        // Truth depends on JUnit, which depends on java.lang.management, which
+        // is not part of Android. Remove this when JUnit 4.13 or later is used.
+        // See: https://github.com/junit-team/junit4/pull/1187.
+        disable 'InvalidPackage'
+    }
+
+    // Workaround to prevent circular dependency on project :testutils.
+    sourceSets {
+        main {
+            java.srcDirs += "../testutils/src/main/java/"
+        }
+        androidTest {
+            java.srcDirs += "../testutils/src/main/java/"
+        }
+        test {
+            java.srcDirs += "../testutils/src/main/java/"
+        }
+    }
+}
+
+hello { task ->
+    println "$task.project.name " +  "-> okay!"
+}
+
+dependencies {
+    compile 'org.robolectric:robolectric:' + robolectricVersion
+    compile 'com.google.truth:truth:' + truthVersion
+//	compile project(":exoplayer2-testutils")
+	compile project(":exoplayer2-library-core")
+    compile 'com.android.support:support-annotations:' + supportLibraryVersion
+}
