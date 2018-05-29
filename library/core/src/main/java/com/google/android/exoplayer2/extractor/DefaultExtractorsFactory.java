@@ -160,13 +160,13 @@ public final class DefaultExtractorsFactory implements ExtractorsFactory {
   @Override
   public synchronized Extractor[] createExtractors() {
     Extractor[] extractors = new Extractor[FLAC_EXTRACTOR_CONSTRUCTOR == null ? 11 : 12];
-    extractors[0] = new MatroskaExtractor(matroskaFlags);
-    extractors[1] = new FragmentedMp4Extractor(fragmentedMp4Flags);
-    extractors[2] = new Mp4Extractor(mp4Flags);
-    extractors[3] = new Mp3Extractor(mp3Flags);
-    extractors[4] = new AdtsExtractor();
-    extractors[5] = new Ac3Extractor();
-    extractors[6] = new TsExtractor(tsMode, tsFlags);
+    extractors[0] = new Mp4Extractor(mp4Flags);
+    extractors[1] = new TsExtractor(tsMode, tsFlags);
+    extractors[2] = new Mp3Extractor(mp3Flags);
+    extractors[3] = new FragmentedMp4Extractor(fragmentedMp4Flags);
+    extractors[4] = new MatroskaExtractor(matroskaFlags);
+    extractors[5] = new AdtsExtractor();
+    extractors[6] = new Ac3Extractor();
     extractors[7] = new FlvExtractor();
     extractors[8] = new OggExtractor();
     extractors[9] = new PsExtractor();
