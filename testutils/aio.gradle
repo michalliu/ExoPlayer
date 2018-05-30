@@ -3,10 +3,6 @@ apply plugin: 'com.android.library'
 android {
 }
 
-hello { task ->
-    println "$task.project.name " +  "-> okay!"
-}
-
 dependencies {
     compile 'org.mockito:mockito-core:' + mockitoVersion
     compile 'com.google.truth:truth:' + truthVersion

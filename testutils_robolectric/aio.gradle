@@ -22,10 +22,6 @@ android {
     }
 }
 
-hello { task ->
-    println "$task.project.name " +  "-> okay!"
-}
-
 dependencies {
     compile 'org.robolectric:robolectric:' + robolectricVersion
     compile 'com.google.truth:truth:' + truthVersion

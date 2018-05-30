@@ -26,7 +26,7 @@ include $(LIBYUV_ROOT)/Android.mk
 
 # build libvpx.so
 LOCAL_PATH := $(WORKING_DIR)
-include libvpx.mk
+include $(WORKING_DIR)/libvpx.mk
 
 # build libvpxJNI.so
 include $(CLEAR_VARS)

@@ -13,10 +13,6 @@ android {
     }
 }
 
-hello { task ->
-    println "$task.project.name " +  "-> okay!"
-}
-
 dependencies {
     compile 'com.android.support:support-annotations:' + supportLibraryVersion
     androidTestCompile 'com.google.dexmaker:dexmaker:' + dexmakerVersion
