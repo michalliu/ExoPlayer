@@ -70,3 +70,6 @@ demo/gradlew.bat
 
 # Vim tmp
 *~
+
+# externalNativeBuild
+.externalNativeBuild
