@@ -809,8 +809,10 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer {
 
   /* package */ void maybeNotifyRenderedFirstFrame() {
     if (!renderedFirstFrame) {
+      TraceUtil.beginSection("RenderedFirstFrame");
       renderedFirstFrame = true;
       eventDispatcher.renderedFirstFrame(surface);
+      TraceUtil.endSection();
     }
   }
 
