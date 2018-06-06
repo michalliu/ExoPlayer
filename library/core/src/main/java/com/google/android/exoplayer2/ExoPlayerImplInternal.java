@@ -37,11 +37,14 @@ import com.google.android.exoplayer2.trackselection.TrackSelectorResult;
 import com.google.android.exoplayer2.util.Assertions;
 import com.google.android.exoplayer2.util.Clock;
 import com.google.android.exoplayer2.util.HandlerWrapper;
+import com.google.android.exoplayer2.util.SimpleHandlerThread;
 import com.google.android.exoplayer2.util.TraceUtil;
 import com.google.android.exoplayer2.util.Util;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.concurrent.CountDownLatch;
 
 /** Implements the internal behavior of {@link ExoPlayerImpl}. */
 /* package */ final class ExoPlayerImplInternal
@@ -124,6 +127,12 @@ import java.util.Collections;
   private SeekPosition pendingInitialSeekPosition;
   private long rendererPositionUs;
   private int nextPendingMessageIndex;
+
+  /**
+   * custom parameters
+   */
+  private HashMap<Renderer, SimpleHandlerThread> mRenderHandlerThreadMap = null;
+  private boolean parallelRender = true; // optimize for video loading speed at first time play
 
   public ExoPlayerImplInternal(
       Renderer[] renderers,
@@ -515,6 +524,46 @@ import java.util.Collections;
 
     boolean renderersEnded = true;
     boolean renderersReadyOrEnded = true;
+
+    if (parallelRender && playbackInfo.playbackState != Player.STATE_READY) {
+        CountDownLatch latch = new CountDownLatch(enabledRenderers.length);
+        RendererRunnable[] rendererRunnables = new RendererRunnable[enabledRenderers.length];
+        int counter = 0;
+        for (Renderer renderer : enabledRenderers) {
+          RendererRunnable rendererRunnable = new RendererRunnable(renderer, rendererPositionUs,
+                  rendererPositionElapsedRealtimeUs, latch);
+          rendererRunnables[counter++] = rendererRunnable;
+
+          if (mRenderHandlerThreadMap == null) {
+            mRenderHandlerThreadMap = new HashMap<Renderer, SimpleHandlerThread>();
+          }
+
+          SimpleHandlerThread renderHandlerThread = mRenderHandlerThreadMap.get(renderer);
+          if (renderHandlerThread == null) {
+            renderHandlerThread = new SimpleHandlerThread("TrackRender-" + renderer.getTrackType(), Process.THREAD_PRIORITY_AUDIO);
+            renderHandlerThread.start();
+            mRenderHandlerThreadMap.put(renderer, renderHandlerThread);
+          }
+          renderHandlerThread.postJob(rendererRunnable);
+        }
+        try {
+          latch.await();
+        } catch (InterruptedException ex) {
+          Thread.currentThread().interrupt();
+        }
+        for (RendererRunnable rendererRunnable : rendererRunnables) {
+          if (rendererRunnable.getExceptionThrown() != null) {
+            throw rendererRunnable.getExceptionThrown();
+          }
+          renderersEnded = renderersEnded && rendererRunnable.isEnded();
+          boolean rendererReadyOrEnded = rendererRunnable.rendererReadyOrEnded();
+          if (!rendererReadyOrEnded) {
+            rendererRunnable.getRenderer().maybeThrowStreamError();
+          }
+          renderersReadyOrEnded = renderersReadyOrEnded && rendererReadyOrEnded;
+        }
+    } else {
+    disableParallelRender();
     for (Renderer renderer : enabledRenderers) {
       // TODO: Each renderer should return the maximum delay before which it wishes to be called
       // again. The minimum of these values should then be used as the delay before the next
@@ -526,11 +575,12 @@ import java.util.Collections;
       // tracks in the current period have uneven durations. See:
       // https://github.com/google/ExoPlayer/issues/1874
       boolean rendererReadyOrEnded = renderer.isReady() || renderer.isEnded()
-          || rendererWaitingForNextStream(renderer);
+              || rendererWaitingForNextStream(renderer);
       if (!rendererReadyOrEnded) {
         renderer.maybeThrowStreamError();
       }
       renderersReadyOrEnded = renderersReadyOrEnded && rendererReadyOrEnded;
+    }
     }
     if (!renderersReadyOrEnded) {
       maybeThrowPeriodPrepareError();
@@ -572,6 +622,16 @@ import java.util.Collections;
     }
 
     TraceUtil.endSection();
+  }
+
+  private void disableParallelRender() {
+    if (parallelRender) {
+      parallelRender = false;
+      for (SimpleHandlerThread renderHandlerThread : mRenderHandlerThreadMap.values()) {
+        renderHandlerThread.quit();
+      }
+      mRenderHandlerThreadMap.clear();
+    }
   }
 
   private void scheduleNextWork(long thisOperationStartTimeMs, long intervalMs) {
@@ -1724,4 +1784,56 @@ import java.util.Collections;
     }
   }
 
+  /**
+   * custom code
+   */
+  private class RendererRunnable implements Runnable {
+    Renderer renderer;
+    long positionUs;
+    long elapsedTimeUs;
+
+    ExoPlaybackException exceptionThrown;
+    boolean renderersEnded;
+    boolean rendererReadyOrEnded;
+
+    CountDownLatch latch;
+
+    public RendererRunnable(Renderer inRenderer,
+                            long inPositionUs,
+                            long inElapsedTimeUs,
+                            CountDownLatch inLatch) {
+      renderer = inRenderer;
+      latch = inLatch;
+    }
+
+    @Override
+    public void run() {
+      try {
+        renderer.render(positionUs, elapsedTimeUs);
+        renderersEnded = renderer.isEnded();
+        rendererReadyOrEnded = renderer.isReady() || renderer.isEnded()
+                || rendererWaitingForNextStream(renderer);
+      } catch (ExoPlaybackException ex) {
+        exceptionThrown = ex;
+      } finally {
+        latch.countDown();
+      }
+    }
+
+    public ExoPlaybackException getExceptionThrown() {
+      return exceptionThrown;
+    }
+
+    public boolean isEnded() {
+      return renderersEnded;
+    }
+
+    public boolean rendererReadyOrEnded() {
+      return rendererReadyOrEnded;
+    }
+
+    public Renderer getRenderer() {
+      return renderer;
+    }
+  }
 }
