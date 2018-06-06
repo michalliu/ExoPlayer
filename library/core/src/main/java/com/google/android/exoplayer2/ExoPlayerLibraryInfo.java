@@ -57,7 +57,7 @@ public final class ExoPlayerLibraryInfo {
    * Whether the library was compiled with {@link com.google.android.exoplayer2.util.TraceUtil}
    * trace enabled.
    */
-  public static final boolean TRACE_ENABLED = BuildConfig.DEBUG;
+  public static final boolean TRACE_ENABLED = true;
 
   private static final HashSet<String> registeredModules = new HashSet<>();
   private static String registeredModulesString = "goog.exo.core";
