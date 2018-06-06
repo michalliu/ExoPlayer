@@ -393,10 +393,10 @@ public abstract class MediaCodecRenderer extends BaseRenderer {
       TraceUtil.beginSection("createCodec:" + codecName);
       codec = MediaCodec.createByCodecName(codecName);
       TraceUtil.endSection();
-      TraceUtil.beginSection("configureCodec");
+      TraceUtil.beginSection("configureCodec:" + codecName);
       configureCodec(codecInfo, codec, format, wrappedMediaCrypto);
       TraceUtil.endSection();
-      TraceUtil.beginSection("startCodec");
+      TraceUtil.beginSection("startCodec:" + codecName);
       codec.start();
       TraceUtil.endSection();
       long codecInitializedTimestamp = SystemClock.elapsedRealtime();
