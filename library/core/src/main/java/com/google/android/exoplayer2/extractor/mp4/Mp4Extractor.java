@@ -33,6 +33,7 @@ import com.google.android.exoplayer2.metadata.Metadata;
 import com.google.android.exoplayer2.util.Assertions;
 import com.google.android.exoplayer2.util.NalUnitUtil;
 import com.google.android.exoplayer2.util.ParsableByteArray;
+import com.google.android.exoplayer2.util.TraceUtil;
 import com.google.android.exoplayer2.util.Util;
 import java.io.IOException;
 import java.lang.annotation.Retention;
@@ -178,17 +179,26 @@ public final class Mp4Extractor implements Extractor, SeekMap {
     while (true) {
       switch (parserState) {
         case STATE_READING_ATOM_HEADER:
+          TraceUtil.beginSection("Mp4Extractor.readAtomHeader");
           if (!readAtomHeader(input)) {
+            TraceUtil.endSection();
             return RESULT_END_OF_INPUT;
           }
+          TraceUtil.endSection();
           break;
         case STATE_READING_ATOM_PAYLOAD:
+          TraceUtil.beginSection("Mp4Extractor.readAtomPayload");
           if (readAtomPayload(input, seekPosition)) {
+            TraceUtil.endSection();
             return RESULT_SEEK;
           }
+          TraceUtil.endSection();
           break;
         case STATE_READING_SAMPLE:
-          return readSample(input, seekPosition);
+          TraceUtil.beginSection("Mp4Extractor.readSample");
+          int nextState = readSample(input, seekPosition);
+          TraceUtil.endSection();
+          return nextState;
         default:
           throw new IllegalStateException();
       }
@@ -361,7 +371,9 @@ public final class Mp4Extractor implements Extractor, SeekMap {
       Atom.ContainerAtom containerAtom = containerAtoms.pop();
       if (containerAtom.type == Atom.TYPE_moov) {
         // We've reached the end of the moov atom. Process it and prepare to read samples.
+        TraceUtil.beginSection("Mp4Extractor.processMoovAtom");
         processMoovAtom(containerAtom);
+        TraceUtil.endSection();
         containerAtoms.clear();
         parserState = STATE_READING_SAMPLE;
       } else if (!containerAtoms.isEmpty()) {
