@@ -95,6 +95,7 @@ import java.util.Arrays;
   private SeekMap seekMap;
   private SampleQueue[] sampleQueues;
   private int[] sampleQueueTrackIds;
+  private int[] sampleQueueTrackTypes;
   private boolean sampleQueuesBuilt;
   private boolean prepared;
   private int actualMinLoadableRetryCount;
@@ -117,6 +118,11 @@ import java.util.Arrays;
   private int extractedSamplesCountAtStartOfLoad;
   private boolean loadingFinished;
   private boolean released;
+
+  /**
+   * custom fields
+   */
+  private boolean useAudioVideoMinBufferPosition;
 
   /**
    * @param uri The {@link Uri} of the media stream.
@@ -168,6 +174,7 @@ import java.util.Arrays;
     };
     handler = new Handler();
     sampleQueueTrackIds = new int[0];
+    sampleQueueTrackTypes = new int[0];
     sampleQueues = new SampleQueue[0];
     pendingResetPositionUs = C.TIME_UNSET;
     length = C.LENGTH_UNSET;
@@ -336,7 +343,7 @@ import java.util.Arrays;
       return pendingResetPositionUs;
     }
     long largestQueuedTimestampUs;
-    if (false && haveAudioVideoTracks) {
+    if (useAudioVideoMinBufferPosition && haveAudioVideoTracks) {
       // Ignore non-AV tracks, which may be sparse or poorly interleaved.
       largestQueuedTimestampUs = Long.MAX_VALUE;
       int trackCount = sampleQueues.length;
@@ -567,6 +574,8 @@ import java.util.Arrays;
     trackOutput.setUpstreamFormatChangeListener(this);
     sampleQueueTrackIds = Arrays.copyOf(sampleQueueTrackIds, trackCount + 1);
     sampleQueueTrackIds[trackCount] = id;
+    sampleQueueTrackTypes = Arrays.copyOf(sampleQueueTrackTypes, trackCount + 1);
+    sampleQueueTrackTypes[trackCount] = type;
     sampleQueues = Arrays.copyOf(sampleQueues, trackCount + 1);
     sampleQueues[trackCount] = trackOutput;
     return trackOutput;
