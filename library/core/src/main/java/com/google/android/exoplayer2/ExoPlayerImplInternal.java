@@ -27,6 +27,7 @@ import android.util.Log;
 import android.util.Pair;
 import com.google.android.exoplayer2.DefaultMediaClock.PlaybackParameterListener;
 import com.google.android.exoplayer2.Player.DiscontinuityReason;
+import com.google.android.exoplayer2.source.ExtractorMediaSource;
 import com.google.android.exoplayer2.source.MediaPeriod;
 import com.google.android.exoplayer2.source.MediaSource;
 import com.google.android.exoplayer2.source.MediaSource.MediaPeriodId;
@@ -594,7 +595,7 @@ import java.util.concurrent.CountDownLatch;
       setState(Player.STATE_ENDED);
       stopRenderers();
     } else if (playbackInfo.playbackState == Player.STATE_BUFFERING
-        && shouldTransitionToReadyState(renderersReadyOrEnded)) {
+        && shouldTransitionToReadyState(parallelRender || renderersReadyOrEnded)) {
       setState(Player.STATE_READY);
       if (playWhenReady) {
         startRenderers();
