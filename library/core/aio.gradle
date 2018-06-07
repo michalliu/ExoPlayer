@@ -11,6 +11,20 @@ android {
             java.srcDirs += "../../testutils_robolectric/src/main/java/"
         }
     }
+
+//    buildTypes {
+//        debug {
+//            buildConfigField "int", "FOO", "42"
+//            buildConfigField "String", "FOO_STRING", "\"foo\""
+//            buildConfigField "boolean", "ENABLE_TRACE", "true"
+//        }
+
+//        release {
+//            buildConfigField "int", "FOO", "52"
+//            buildConfigField "String", "FOO_STRING", "\"bar\""
+//            buildConfigField "boolean", "ENABLE_TRACE", "false"
+//        }
+//    }
 }
 
 dependencies {
