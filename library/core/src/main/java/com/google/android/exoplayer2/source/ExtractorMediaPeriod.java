@@ -42,6 +42,7 @@ import com.google.android.exoplayer2.upstream.Loader.Loadable;
 import com.google.android.exoplayer2.util.Assertions;
 import com.google.android.exoplayer2.util.ConditionVariable;
 import com.google.android.exoplayer2.util.MimeTypes;
+import com.google.android.exoplayer2.util.TraceUtil;
 import com.google.android.exoplayer2.util.Util;
 import java.io.EOFException;
 import java.io.IOException;
@@ -335,7 +336,7 @@ import java.util.Arrays;
       return pendingResetPositionUs;
     }
     long largestQueuedTimestampUs;
-    if (haveAudioVideoTracks) {
+    if (false && haveAudioVideoTracks) {
       // Ignore non-AV tracks, which may be sparse or poorly interleaved.
       largestQueuedTimestampUs = Long.MAX_VALUE;
       int trackCount = sampleQueues.length;
@@ -848,6 +849,7 @@ import java.util.Arrays;
             extractor.seek(position, seekTimeUs);
             pendingExtractorSeek = false;
           }
+          TraceUtil.beginSection("ExtractorRead");
           while (result == Extractor.RESULT_CONTINUE && !loadCanceled) {
             loadCondition.block();
             result = extractor.read(input, positionHolder);
@@ -857,6 +859,7 @@ import java.util.Arrays;
               handler.post(onContinueLoadingRequestedRunnable);
             }
           }
+          TraceUtil.endSection();
         } finally {
           if (result == Extractor.RESULT_SEEK) {
             result = Extractor.RESULT_CONTINUE;
