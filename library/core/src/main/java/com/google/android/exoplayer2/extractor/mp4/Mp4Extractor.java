@@ -732,9 +732,9 @@ public final class Mp4Extractor implements Extractor, SeekMap {
 
   private static final class Mp4Track {
 
-    public final Track track;
-    public final TrackSampleTable sampleTable;
-    public final TrackOutput trackOutput;
+    public final Track track; // parsed from moov atom
+    public final TrackSampleTable sampleTable; //parsed from moov atom
+    public final TrackOutput trackOutput; // SampleQueue associate with the track
 
     public int sampleIndex;
 
