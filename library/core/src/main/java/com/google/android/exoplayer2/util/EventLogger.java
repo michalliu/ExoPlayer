@@ -264,7 +264,16 @@ public class EventLogger
         + elapsedSinceLastFeedMs + "]", null);
   }
 
-  // VideoRendererEventListener
+  @Override
+  public boolean isNeedAudioData() {
+    return false;
+  }
+
+  @Override
+  public void onRenderAudioData(byte[] audioData) {
+
+  }
+// VideoRendererEventListener
 
   @Override
   public void onVideoEnabled(DecoderCounters counters) {

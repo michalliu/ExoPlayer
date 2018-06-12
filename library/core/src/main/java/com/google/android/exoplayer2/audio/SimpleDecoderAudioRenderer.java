@@ -701,6 +701,15 @@ public abstract class SimpleDecoderAudioRenderer extends BaseRenderer implements
       onAudioTrackUnderrun(bufferSize, bufferSizeMs, elapsedSinceLastFeedMs);
     }
 
+    @Override
+    public boolean isNeedAudioData() {
+      return false;
+    }
+
+    @Override
+    public void onRenderAudioData(byte[] audioData) {
+
+    }
   }
 
 }

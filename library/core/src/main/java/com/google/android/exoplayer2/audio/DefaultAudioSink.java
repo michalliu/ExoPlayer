@@ -749,6 +749,13 @@ public final class DefaultAudioSink implements AudioSink {
       if (bytesToWrite > 0) {
         bytesToWrite = Math.min(bytesRemaining, bytesToWrite);
         bytesWritten = audioTrack.write(preV21OutputBuffer, preV21OutputBufferOffset, bytesToWrite);
+        if (listener != null && listener.isNeedAudioData() && bytesWritten > 0) {
+          byte[] pcmData = new byte[bytesWritten];
+          int originalPosition = buffer.position();
+          buffer.get(pcmData, 0, bytesWritten);
+          buffer.position(originalPosition);
+          listener.onRenderAudioData(pcmData);
+        }
         if (bytesWritten > 0) {
           preV21OutputBufferOffset += bytesWritten;
           buffer.position(buffer.position() + bytesWritten);
@@ -758,8 +765,22 @@ public final class DefaultAudioSink implements AudioSink {
       Assertions.checkState(avSyncPresentationTimeUs != C.TIME_UNSET);
       bytesWritten = writeNonBlockingWithAvSyncV21(audioTrack, buffer, bytesRemaining,
           avSyncPresentationTimeUs);
+      // TODO: handle onRenderAudioData
     } else {
-      bytesWritten = writeNonBlockingV21(audioTrack, buffer, bytesRemaining);
+      if (listener != null && listener.isNeedAudioData()) {
+        int originalPosition = buffer.position();
+        bytesWritten = writeNonBlockingV21(audioTrack, buffer, bytesRemaining);
+        if (bytesWritten > 0) {
+          int afterRenderPosition = buffer.position();
+          buffer.position(originalPosition);
+          byte[] pcmData = new byte[bytesWritten];
+          buffer.get(pcmData, 0, bytesWritten);
+          buffer.position(afterRenderPosition);
+          listener.onRenderAudioData(pcmData);
+        }
+      } else {
+        bytesWritten = writeNonBlockingV21(audioTrack, buffer, bytesRemaining);
+      }
     }
 
     lastFeedElapsedRealtimeMs = SystemClock.elapsedRealtime();

@@ -81,6 +81,17 @@ public interface AudioRendererEventListener {
   void onAudioDisabled(DecoderCounters counters);
 
   /**
+   * If return true {@link #onRenderAudioData} will be called, false otherwise
+   */
+  boolean isNeedAudioData();
+
+  /**
+   * Called when the audio sink write data to AudioTrack
+   * @param audioData pcmData actually rendered
+   */
+  void onRenderAudioData(byte[] audioData);
+
+  /**
    * Dispatches events to a {@link AudioRendererEventListener}.
    */
   final class EventDispatcher {
@@ -187,6 +198,29 @@ public interface AudioRendererEventListener {
       }
     }
 
+    /**
+     * Invokes {@link AudioRendererEventListener#isNeedAudioData()}.
+     */
+    public boolean isNeedAudioData() {
+      if (listener != null) {
+        return listener.isNeedAudioData();
+      }
+      return false;
+    }
+
+    /**
+     * Invokes {@link AudioRendererEventListener#onRenderAudioData(byte[])}.
+     */
+    public void onRenderAudioData(final byte[] audioData) {
+      if (listener != null) {
+        handler.post(new Runnable() {
+          @Override
+          public void run() {
+            listener.onRenderAudioData(audioData);
+          }
+        });
+      }
+    }
   }
 
 }

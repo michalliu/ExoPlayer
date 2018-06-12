@@ -969,6 +969,16 @@ public class SimpleExoPlayer implements ExoPlayer, Player.VideoComponent, Player
       audioSessionId = C.AUDIO_SESSION_ID_UNSET;
     }
 
+    @Override
+    public boolean isNeedAudioData() {
+      return false;
+    }
+
+    @Override
+    public void onRenderAudioData(byte[] audioData) {
+
+    }
+
     // TextOutput implementation
 
     @Override

@@ -81,6 +81,16 @@ public interface AudioSink {
      */
     void onUnderrun(int bufferSize, long bufferSizeMs, long elapsedSinceLastFeedMs);
 
+    /**
+     * If return true {@link #onRenderAudioData} will be called, false otherwise
+     */
+    boolean isNeedAudioData();
+
+    /**
+     * Called when the audio sink write data to AudioTrack
+     * @param audioData pcmData actually rendered
+     */
+    void onRenderAudioData(byte[] audioData);
   }
 
   /**

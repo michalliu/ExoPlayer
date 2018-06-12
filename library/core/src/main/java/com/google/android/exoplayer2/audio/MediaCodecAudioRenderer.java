@@ -540,6 +540,15 @@ public class MediaCodecAudioRenderer extends MediaCodecRenderer implements Media
       onAudioTrackUnderrun(bufferSize, bufferSizeMs, elapsedSinceLastFeedMs);
     }
 
+    @Override
+    public boolean isNeedAudioData() {
+      return eventDispatcher.isNeedAudioData();
+    }
+
+    @Override
+    public void onRenderAudioData(byte[] audioData) {
+      eventDispatcher.onRenderAudioData(audioData);
+    }
   }
 
 }
