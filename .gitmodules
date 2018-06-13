@@ -1,9 +1,9 @@
 [submodule "extensions/vp9/src/main/jni/libvpx"]
 	path = extensions/vp9/src/main/jni/libvpx
-	url = http://git.code.oa.com/michalliu/exoplayer2_libvpx.git
+	url = http://git.code.oa.com/oskplayer2/libvpx.git
 [submodule "extensions/vp9/src/main/jni/libyuv"]
 	path = extensions/vp9/src/main/jni/libyuv
-	url = http://git.code.oa.com/michalliu/exoplayer2_libyuv.git
+	url = http://git.code.oa.com/oskplayer2/libyuv.git
 [submodule "extensions/vp9/src/main/jni/libvpx_android_configs"]
 	path = extensions/vp9/src/main/jni/libvpx_android_configs
-	url = http://git.code.oa.com/michalliu/exoplayer2_libvpx_android_configs
+	url = http://git.code.oa.com/oskplayer2/libvpx_android_configs
