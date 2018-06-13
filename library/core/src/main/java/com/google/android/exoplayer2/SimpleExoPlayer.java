@@ -971,12 +971,14 @@ public class SimpleExoPlayer implements ExoPlayer, Player.VideoComponent, Player
 
     @Override
     public boolean isNeedAudioData() {
-      return false;
+      return audioDebugListeners.size() > 0;
     }
 
     @Override
     public void onRenderAudioData(byte[] audioData) {
-
+      for (AudioRendererEventListener audioDebugListener : audioDebugListeners) {
+        audioDebugListener.onRenderAudioData(audioData);
+      }
     }
 
     // TextOutput implementation
