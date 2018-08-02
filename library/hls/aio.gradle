@@ -4,7 +4,7 @@ android {
 }
 
 dependencies {
-	compile project(':exoplayer2-library-core')
-    compile 'com.android.support:support-annotations:' + supportLibraryVersion
-    testCompile project(':exoplayer2-testutils-robolectric')
+    implementation project(':exoplayer2-library-core')
+    implementation 'com.android.support:support-annotations:' + supportLibraryVersion
+    testImplementation project(':exoplayer2-testutils-robolectric')
 }

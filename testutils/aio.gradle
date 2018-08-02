@@ -4,9 +4,9 @@ android {
 }
 
 dependencies {
-    compile 'org.mockito:mockito-core:' + mockitoVersion
-    compile 'com.google.truth:truth:' + truthVersion
-    compile 'com.android.support:support-annotations:' + supportLibraryVersion
-    compile project(":exoplayer2-library-core")
-    testCompile project(':exoplayer2-testutils-robolectric')
+    api 'org.mockito:mockito-core:' + mockitoVersion
+    api 'com.google.truth:truth:' + truthVersion
+    implementation 'com.android.support:support-annotations:' + supportLibraryVersion
+    implementation project(":exoplayer2-library-core")
+    testApi project(':exoplayer2-testutils-robolectric')
 }

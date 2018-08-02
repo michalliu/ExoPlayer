@@ -23,9 +23,9 @@ android {
 }
 
 dependencies {
-    compile 'org.robolectric:robolectric:' + robolectricVersion
-    compile 'com.google.truth:truth:' + truthVersion
+    api 'org.robolectric:robolectric:' + robolectricVersion
+    api 'com.google.truth:truth:' + truthVersion
 //	compile project(":exoplayer2-testutils")
-	compile project(":exoplayer2-library-core")
-    compile 'com.android.support:support-annotations:' + supportLibraryVersion
+	implementation project(":exoplayer2-library-core")
+    implementation 'com.android.support:support-annotations:' + supportLibraryVersion
 }
