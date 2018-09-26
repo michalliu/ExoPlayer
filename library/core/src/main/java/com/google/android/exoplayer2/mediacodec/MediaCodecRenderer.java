@@ -763,6 +763,8 @@ public abstract class MediaCodecRenderer extends BaseRenderer {
       decoderCounters.inputBufferCount++;
     } catch (CryptoException e) {
       throw ExoPlaybackException.createForRenderer(e, getIndex());
+    } catch (RuntimeException e) {
+      throw ExoPlaybackException.createForRenderer(e, getIndex());
     }
     return true;
   }
