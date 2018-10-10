@@ -20,7 +20,6 @@ import android.util.Log;
 import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.Format;
 import com.google.android.exoplayer2.FormatHolder;
-import com.google.android.exoplayer2.ParserException;
 import com.google.android.exoplayer2.decoder.DecoderInputBuffer;
 import com.google.android.exoplayer2.extractor.DummyTrackOutput;
 import com.google.android.exoplayer2.extractor.ExtractorOutput;
@@ -611,7 +610,7 @@ import java.util.Arrays;
       }
       return Loader.DONT_RETRY;
     } else {
-      return error instanceof ParserException ? Loader.DONT_RETRY_FATAL : Loader.RETRY;
+      return Loader.RETRY;
     }
   }
 

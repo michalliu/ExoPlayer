@@ -20,7 +20,6 @@ import android.util.SparseArray;
 import android.util.SparseBooleanArray;
 import android.util.SparseIntArray;
 import com.google.android.exoplayer2.C;
-import com.google.android.exoplayer2.ParserException;
 import com.google.android.exoplayer2.extractor.Extractor;
 import com.google.android.exoplayer2.extractor.ExtractorInput;
 import com.google.android.exoplayer2.extractor.ExtractorOutput;
@@ -123,7 +122,6 @@ public final class TsExtractor implements Extractor {
   private int remainingPmts;
   private boolean tracksEnded;
   private TsPayloadReader id3Reader;
-  private int bytesSinceLastSync;
 
   public TsExtractor() {
     this(0);
@@ -165,7 +163,7 @@ public final class TsExtractor implements Extractor {
       timestampAdjusters = new ArrayList<>();
       timestampAdjusters.add(timestampAdjuster);
     }
-    tsPacketBuffer = new ParsableByteArray(new byte[BUFFER_SIZE], 0);
+    tsPacketBuffer = new ParsableByteArray(BUFFER_SIZE);
     trackIds = new SparseBooleanArray();
     tsPayloadReaders = new SparseArray<>();
     continuityCounters = new SparseIntArray();
@@ -208,7 +206,6 @@ public final class TsExtractor implements Extractor {
     continuityCounters.clear();
     // Elementary stream readers' state should be cleared to get consistent behaviours when seeking.
     resetPayloadReaders();
-    bytesSinceLastSync = 0;
   }
 
   @Override
@@ -241,9 +238,8 @@ public final class TsExtractor implements Extractor {
     }
 
     // Note: See ISO/IEC 13818-1, section 2.4.3.2 for details of the header format.
-    int limit = tsPacketBuffer.limit();
+    final int limit = tsPacketBuffer.limit();
     int position = tsPacketBuffer.getPosition();
-    int searchStart = position;
     while (position < limit && data[position] != TS_SYNC_BYTE) {
       position++;
     }
@@ -251,13 +247,8 @@ public final class TsExtractor implements Extractor {
 
     int endOfPacket = position + TS_PACKET_SIZE;
     if (endOfPacket > limit) {
-      bytesSinceLastSync += position - searchStart;
-      if (mode == MODE_HLS && bytesSinceLastSync > TS_PACKET_SIZE * 2) {
-        throw new ParserException("Cannot find sync byte. Most likely not a Transport Stream.");
-      }
       return RESULT_CONTINUE;
     }
-    bytesSinceLastSync = 0;
 
     int tsPacketHeader = tsPacketBuffer.readInt();
     if ((tsPacketHeader & 0x800000) != 0) { // transport_error_indicator
