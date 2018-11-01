@@ -1324,4 +1324,10 @@ public abstract class MediaCodecRenderer extends BaseRenderer {
         && "OMX.MTK.AUDIO.DECODER.MP3".equals(name);
   }
 
+  /**
+   * Returns the index of the renderer within the player.
+   */
+  public int getRenderIndex() {
+    return getIndex();
+  }
 }

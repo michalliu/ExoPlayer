@@ -90,7 +90,7 @@ public final class ExoPlaybackException extends Exception {
    * @param cause The cause of the failure.
    * @return The created instance.
    */
-  /* package */ static ExoPlaybackException createForUnexpected(RuntimeException cause) {
+  /* package */ static ExoPlaybackException createForUnexpected(Exception cause) {
     return new ExoPlaybackException(TYPE_UNEXPECTED, null, cause, C.INDEX_UNSET);
   }
 

@@ -27,6 +27,7 @@ import android.util.Log;
 import android.util.Pair;
 import com.google.android.exoplayer2.DefaultMediaClock.PlaybackParameterListener;
 import com.google.android.exoplayer2.Player.DiscontinuityReason;
+import com.google.android.exoplayer2.mediacodec.MediaCodecRenderer;
 import com.google.android.exoplayer2.source.ExtractorMediaSource;
 import com.google.android.exoplayer2.source.MediaPeriod;
 import com.google.android.exoplayer2.source.MediaSource;
@@ -1814,8 +1815,12 @@ import java.util.concurrent.CountDownLatch;
         renderersEnded = renderer.isEnded();
         rendererReadyOrEnded = renderer.isReady() || renderer.isEnded()
                 || rendererWaitingForNextStream(renderer);
-      } catch (ExoPlaybackException ex) {
-        exceptionThrown = ex;
+      } catch (Exception cause) {
+        if (renderer instanceof MediaCodecRenderer) {
+          exceptionThrown = ExoPlaybackException.createForRenderer(cause, ((MediaCodecRenderer) renderer).getRenderIndex());
+        } else {
+          exceptionThrown = ExoPlaybackException.createForUnexpected(cause);
+        }
       } finally {
         latch.countDown();
       }
